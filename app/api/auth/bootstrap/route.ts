@@ -49,7 +49,8 @@ export async function POST(request: Request) {
     await setSetting("password_hash", await hashPassword(password));
     await setSetting("password_bootstrap_version", String(version));
     return Response.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("Password bootstrap failed", error);
     return Response.json(
       { error: "Бастапқы парольді орнату мүмкін болмады." },
       { status: 500 },

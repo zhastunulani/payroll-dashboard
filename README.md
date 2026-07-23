@@ -138,7 +138,7 @@ Postgres кестелері мен бастапқы анықтамалықтар
 дайындап қойған:
 
 - Node.js Web Service;
-- `npm ci && npm run build` build командасы;
+- `npm ci --include=dev && npm run build` build командасы;
 - `npm start` іске қосу командасы;
 - `main` branch үшін автоматты deployment;
 - `/api/health` health check;

@@ -25,7 +25,7 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import { readSheet } from "read-excel-file/browser";
 import type {
   BreakdownItem,
   PayrollData,
@@ -535,15 +535,27 @@ export function PayrollApp() {
     try {
       const fileBuffer = await file.arrayBuffer();
       const isCsv = file.name.toLocaleLowerCase("kk-KZ").endsWith(".csv");
-      const rawRows = isCsv
-        ? parseDelimitedRows(new TextDecoder("utf-8").decode(fileBuffer))
-        : (() => {
-            const workbook = XLSX.read(fileBuffer, { type: "array" });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            return XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
-              defval: "",
-            });
-          })();
+      let rawRows: Record<string, unknown>[];
+      if (isCsv) {
+        rawRows = parseDelimitedRows(
+          new TextDecoder("utf-8").decode(fileBuffer),
+        );
+      } else {
+        const [headerRow = [], ...sheetRows] = await readSheet(fileBuffer);
+        const headers = headerRow.map((cell) => String(cell ?? "").trim());
+        rawRows = sheetRows
+          .filter((row) =>
+            row.some((cell) => String(cell ?? "").trim() !== ""),
+          )
+          .map((row) =>
+            Object.fromEntries(
+              headers.map((header, index) => [
+                header,
+                row[index] ?? "",
+              ]),
+            ),
+          );
+      }
       const knownDepartments = new Set(
         data.departments
           .filter((department) => !department.archivedAt)
@@ -857,7 +869,7 @@ export function PayrollApp() {
                     <div className="toolbar-actions">
                       <label className="search-box"><Search size={17} /><input placeholder="Аты немесе төлем түрі" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
                       <button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} /> Импорт</button>
-                      <input ref={importInput} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void readImport(event)} />
+                      <input ref={importInput} hidden type="file" accept=".xlsx,.csv" onChange={(event) => void readImport(event)} />
                       <button className="primary-button" onClick={newEmployee}><Plus size={17} /> Қызметкер қосу</button>
                     </div>
                   </div>

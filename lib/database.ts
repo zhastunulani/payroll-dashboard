@@ -11,6 +11,7 @@ type RuntimeEnv = {
   DB?: D1Database;
   APP_PASSWORD_HASH?: string;
   SESSION_SECRET?: string;
+  PASSWORD_BOOTSTRAP_SECRET?: string;
 };
 
 let initialization: Promise<void> | null = null;

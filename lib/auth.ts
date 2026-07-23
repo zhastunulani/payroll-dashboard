@@ -60,7 +60,9 @@ export async function verifyPassword(
   password: string,
   storedHash: string,
 ): Promise<boolean> {
-  const [algorithm, iterationValue, saltValue, hashValue] = storedHash.split("$");
+  const separator = storedHash.includes(":") ? ":" : "$";
+  const [algorithm, iterationValue, saltValue, hashValue] =
+    storedHash.split(separator);
   if (algorithm !== "pbkdf2" || !iterationValue || !saltValue || !hashValue) {
     return false;
   }

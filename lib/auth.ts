@@ -16,6 +16,16 @@ function base64ToBytes(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+function hexToBytes(value: string): Uint8Array {
+  if (!/^[0-9a-f]+$/i.test(value) || value.length % 2 !== 0) {
+    throw new Error("Invalid hex value");
+  }
+  return Uint8Array.from(
+    value.match(/.{2}/g) ?? [],
+    (pair) => Number.parseInt(pair, 16),
+  );
+}
+
 async function pbkdf2(
   password: string,
   salt: Uint8Array,
@@ -60,7 +70,11 @@ export async function verifyPassword(
   password: string,
   storedHash: string,
 ): Promise<boolean> {
-  const separator = storedHash.includes(":") ? ":" : "$";
+  const separator = storedHash.includes(".")
+    ? "."
+    : storedHash.includes(":")
+      ? ":"
+      : "$";
   const [algorithm, iterationValue, saltValue, hashValue] =
     storedHash.split(separator);
   if (algorithm !== "pbkdf2" || !iterationValue || !saltValue || !hashValue) {
@@ -69,8 +83,9 @@ export async function verifyPassword(
   const iterations = Number(iterationValue);
   if (!Number.isInteger(iterations) || iterations < 50_000) return false;
   try {
-    const actual = await pbkdf2(password, base64ToBytes(saltValue), iterations);
-    return constantTimeEqual(actual, base64ToBytes(hashValue));
+    const decode = separator === "." ? hexToBytes : base64ToBytes;
+    const actual = await pbkdf2(password, decode(saltValue), iterations);
+    return constantTimeEqual(actual, decode(hashValue));
   } catch {
     return false;
   }

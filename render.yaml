@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: payroll-dashboard
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

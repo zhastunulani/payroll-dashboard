@@ -11,6 +11,7 @@ export type SalaryRecord = {
   id: string;
   employeeId: string;
   employeeName: string;
+  position: string;
   departmentId: string;
   departmentName: string;
   paymentMethodId: string;

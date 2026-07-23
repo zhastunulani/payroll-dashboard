@@ -5,13 +5,11 @@ import {
   Archive,
   ArrowDownRight,
   ArrowUpRight,
-  Banknote,
   Building2,
   CalendarDays,
   Check,
   CheckCircle2,
   ChevronDown,
-  CircleDollarSign,
   Clock3,
   FileSpreadsheet,
   LayoutDashboard,
@@ -47,6 +45,123 @@ const CURRENCY = new Intl.NumberFormat("kk-KZ", {
 
 function formatMoney(value: number): string {
   return CURRENCY.format(value).replace("KZT", "₸");
+}
+
+function normalizedHeader(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("kk-KZ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function columnValue(
+  row: Record<string, unknown>,
+  aliases: string[],
+): unknown {
+  const values = new Map(
+    Object.entries(row).map(([key, value]) => [normalizedHeader(key), value]),
+  );
+  for (const alias of aliases) {
+    const value = values.get(normalizedHeader(alias));
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function parseDelimitedRows(content: string): Record<string, unknown>[] {
+  const source = content.replace(/^\uFEFF/, "");
+  const firstLine = source.split(/\r?\n/, 1)[0] ?? "";
+  const delimiter = [",", ";", "\t"].sort(
+    (left, right) =>
+      firstLine.split(right).length - firstLine.split(left).length,
+  )[0];
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      row.push(value);
+      value = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  row.push(value);
+  if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+
+  const headers = (rows.shift() ?? []).map((header) => header.trim());
+  return rows.map((cells) =>
+    Object.fromEntries(
+      headers.map((header, index) => [header, cells[index]?.trim() ?? ""]),
+    ),
+  );
+}
+
+function parseMoneyValue(value: unknown): number {
+  if (typeof value === "number") return Math.round(value);
+  const source = String(value ?? "").trim();
+  if (!source) return 0;
+  const normalized = source
+    .replace(/\u00a0/g, "")
+    .replace(/[^\d-]/g, "");
+  if (!normalized || normalized === "-") return Number.NaN;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : Number.NaN;
+}
+
+function parsePaidValue(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  return ["true", "иә", "да", "төленді", "оплачено", "+"].includes(
+    String(value ?? "").trim().toLocaleLowerCase("kk-KZ"),
+  );
+}
+
+const MONTH_IMPORT_HEADERS = [
+  ["Қаңтар", "Январь"],
+  ["Ақпан", "Февраль"],
+  ["Наурыз", "Март"],
+  ["Сәуір", "Апрель"],
+  ["Мамыр", "Май"],
+  ["Маусым", "Июнь"],
+  ["Шілде", "Июль"],
+  ["Тамыз", "Август"],
+  ["Қыркүйек", "Сентябрь"],
+  ["Қазан", "Октябрь"],
+  ["Қараша", "Ноябрь"],
+  ["Желтоқсан", "Декабрь"],
+];
+
+function normalizePaymentMethod(value: unknown, fallback: string): string {
+  const method = String(value ?? "").trim();
+  const normalized = method.toLocaleLowerCase("kk-KZ").replace(/\s+/g, " ");
+  if (!normalized || normalized === "/+пс") return fallback;
+  if (normalized.includes("официально") && normalized.includes("ип")) {
+    return "Ресми + ЖК";
+  }
+  if (normalized === "официально") return "Ресми";
+  if (normalized === "ип") return "ЖК";
+  if (normalized.includes("самозанят")) return "Өзін-өзі жұмыспен қамтыған";
+  if (normalized.includes("перевод")) return "Аударым";
+  return method;
 }
 
 function changePercent(current: number, previous?: number): number | null {
@@ -246,6 +361,7 @@ function BreakdownBars({
 type EmployeeDraft = {
   employeeId?: string;
   fullName: string;
+  position: string;
   departmentId: string;
   paymentMethodId: string;
   baseSalary: number;
@@ -263,9 +379,11 @@ type ExpenseDraft = {
 type ImportRow = {
   department: string;
   fullName: string;
+  position: string;
   baseSalary: number;
   ps: number;
   paymentMethod: string;
+  isPaid: boolean;
   error?: string;
 };
 
@@ -291,9 +409,11 @@ export function PayrollApp() {
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
 
-  async function load(targetMonth?: string) {
-    setLoading(true);
-    setError("");
+  async function load(targetMonth?: string, initial = false) {
+    if (!initial) {
+      setLoading(true);
+      setError("");
+    }
     try {
       const query = targetMonth ? `?month=${encodeURIComponent(targetMonth)}` : "";
       const response = await fetch(`/api/payroll${query}`, { cache: "no-store" });
@@ -317,7 +437,10 @@ export function PayrollApp() {
   }
 
   useEffect(() => {
-    void load();
+    const initialLoad = window.setTimeout(() => {
+      void load(undefined, true);
+    }, 0);
+    return () => window.clearTimeout(initialLoad);
   }, []);
 
   async function mutate(action: string, payload: Record<string, unknown> = {}) {
@@ -381,6 +504,7 @@ export function PayrollApp() {
     if (!data) return;
     setEmployeeDraft({
       fullName: "",
+      position: "",
       departmentId:
         selectedDepartment ||
         data.departments.find((department) => !department.archivedAt)?.id ||
@@ -396,6 +520,7 @@ export function PayrollApp() {
     setEmployeeDraft({
       employeeId: employee.employeeId,
       fullName: employee.employeeName,
+      position: employee.position,
       departmentId: employee.departmentId,
       paymentMethodId: employee.paymentMethodId,
       baseSalary: employee.baseSalary,
@@ -408,11 +533,17 @@ export function PayrollApp() {
     event.target.value = "";
     if (!file || !data) return;
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
-        defval: "",
-      });
+      const fileBuffer = await file.arrayBuffer();
+      const isCsv = file.name.toLocaleLowerCase("kk-KZ").endsWith(".csv");
+      const rawRows = isCsv
+        ? parseDelimitedRows(new TextDecoder("utf-8").decode(fileBuffer))
+        : (() => {
+            const workbook = XLSX.read(fileBuffer, { type: "array" });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            return XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
+              defval: "",
+            });
+          })();
       const knownDepartments = new Set(
         data.departments
           .filter((department) => !department.archivedAt)
@@ -423,22 +554,83 @@ export function PayrollApp() {
           .filter((method) => !method.archivedAt)
           .map((method) => method.name.toLocaleLowerCase("kk-KZ")),
       );
+      const fallbackMethod =
+        data.paymentMethods.find((method) => method.id === "method-transfer")
+          ?.name ??
+        data.paymentMethods.find((method) => !method.archivedAt)?.name ??
+        "";
+      const selectedMonthHeaders =
+        MONTH_IMPORT_HEADERS[data.selectedMonth.month - 1] ?? [];
+      const existing = new Set(
+        data.salaries.map(
+          (salary) =>
+            `${salary.departmentName.toLocaleLowerCase("kk-KZ")}:${salary.employeeName.toLocaleLowerCase("kk-KZ")}`,
+        ),
+      );
       const seen = new Set<string>();
       const rows = rawRows.map((row) => {
-        const department = String(row["Бөлім"] ?? "").trim();
-        const fullName = String(row["Қызметкер"] ?? "").trim();
-        const paymentMethod = String(row["Төлем түрі"] ?? "").trim();
-        const baseSalary = Number(row["Негізгі айлық"] ?? 0);
-        const ps = Number(row["ПС"] ?? 0);
+        const department =
+          String(
+            columnValue(row, ["Бөлім", "Отдел"]) ||
+              currentDepartment?.name ||
+              "",
+          ).trim();
+        const fullName = String(
+          columnValue(row, [
+            "Қызметкер",
+            "ФИО",
+            "Аты-жөні",
+            "Сотрудник",
+            "Имя",
+          ]),
+        ).trim();
+        const position = String(
+          columnValue(row, ["Лауазым", "Должность", "Қызметі"]),
+        ).trim();
+        const paymentMethod = normalizePaymentMethod(
+          columnValue(row, [
+            "Төлем түрі",
+            "Төлем форматы",
+            "Способ оплаты",
+            "Оплата",
+          ]),
+          fallbackMethod,
+        );
+        const baseSalary = parseMoneyValue(
+          columnValue(row, [
+            "Негізгі айлық",
+            "Айлық",
+            "Сумма",
+            "Общий зп",
+            "Жалпы айлық",
+            "ЗП",
+            "Зарплата",
+            ...selectedMonthHeaders,
+          ]),
+        );
+        const ps = parseMoneyValue(columnValue(row, ["ПС"]));
+        const isPaid = parsePaidValue(
+          columnValue(row, ["Төленді", "Төленген", "Оплачено"]),
+        );
         const key = `${department.toLocaleLowerCase("kk-KZ")}:${fullName.toLocaleLowerCase("kk-KZ")}`;
         let rowError = "";
         if (!department || !fullName || !paymentMethod) rowError = "Міндетті бағандар бос.";
         else if (!knownDepartments.has(department.toLocaleLowerCase("kk-KZ"))) rowError = "Белгісіз бөлім.";
         else if (!knownMethods.has(paymentMethod.toLocaleLowerCase("kk-KZ"))) rowError = "Белгісіз төлем түрі.";
         else if (!Number.isFinite(baseSalary) || baseSalary < 0 || !Number.isFinite(ps) || ps < 0) rowError = "Сома дұрыс емес.";
+        else if (existing.has(key)) rowError = "Бұл қызметкер осы айда бар.";
         else if (seen.has(key)) rowError = "Файлда қайталанған жол.";
         seen.add(key);
-        return { department, fullName, paymentMethod, baseSalary, ps, error: rowError || undefined };
+        return {
+          department,
+          fullName,
+          position,
+          paymentMethod,
+          baseSalary,
+          ps,
+          isPaid,
+          error: rowError || undefined,
+        };
       });
       setImportRows(rows);
     } catch {
@@ -674,7 +866,7 @@ export function PayrollApp() {
                       <div className="table-head"><span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Жалпы сома</span><span>Төленді</span><span /></div>
                       {filteredEmployees.map((employee) => (
                         <div className={`table-row ${employee.archivedAt ? "archived-row" : ""}`} key={employee.id}>
-                          <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><b>{employee.employeeName}</b>{employee.archivedAt && <em>Архив</em>}</span>
+                          <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b>{employee.position && <small>{employee.position}</small>}</span>{employee.archivedAt && <em>Архив</em>}</span>
                           <span><span className="method-chip">{employee.paymentMethodName}</span></span>
                           <span className="money-cell">{formatMoney(employee.baseSalary)}</span>
                           <span className="component-cell">
@@ -797,6 +989,7 @@ export function PayrollApp() {
           <form className="modal-form" onSubmit={(event) => { event.preventDefault(); void mutate("saveEmployee", employeeDraft as unknown as Record<string, unknown>); }}>
             <div className="form-grid">
               <label className="span-two"><span>Аты-жөні</span><input required value={employeeDraft.fullName} onChange={(event) => setEmployeeDraft({ ...employeeDraft, fullName: event.target.value })} placeholder="Қызметкердің толық аты" /></label>
+              <label className="span-two"><span>Лауазымы</span><input value={employeeDraft.position} onChange={(event) => setEmployeeDraft({ ...employeeDraft, position: event.target.value })} placeholder="Мысалы: Мұғалім, куратор немесе менеджер" /></label>
               <label><span>Бөлім</span><select required value={employeeDraft.departmentId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, departmentId: event.target.value })}>{data.departments.filter((department) => !department.archivedAt).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
               <label><span>Төлем түрі</span><select required value={employeeDraft.paymentMethodId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, paymentMethodId: event.target.value })}>{data.paymentMethods.filter((method) => !method.archivedAt).map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
               <label className="span-two"><span>Негізгі айлық</span><div className="amount-input"><input required min={0} type="number" value={employeeDraft.baseSalary} onChange={(event) => setEmployeeDraft({ ...employeeDraft, baseSalary: Number(event.target.value) })} /><b>₸</b></div></label>
@@ -851,16 +1044,16 @@ export function PayrollApp() {
       )}
 
       {importRows && (
-        <Modal title="Қызметкерлерді импорттау" subtitle="Excel / CSV алдын ала тексеру" onClose={() => setImportRows(null)} wide>
+        <Modal title={`${currentDepartment?.name ?? "Бөлім"}: импорт`} subtitle="Excel / CSV алдын ала тексеру" onClose={() => setImportRows(null)} wide>
           <div className="import-content">
-            <div className="import-summary"><span><FileSpreadsheet size={20} /> {importRows.length} жол табылды</span><strong className={importRows.some((row) => row.error) ? "has-errors" : ""}>{importRows.filter((row) => row.error).length} қате</strong></div>
+            <div className="import-summary"><span><FileSpreadsheet size={20} /> {importRows.length} адам</span><span>Айлық қоры: <strong>{formatMoney(importRows.reduce((sum, row) => sum + row.baseSalary + row.ps, 0))}</strong></span><strong className={importRows.some((row) => row.error) ? "has-errors" : ""}>{importRows.filter((row) => row.error).length} қате</strong></div>
             <div className="import-table">
-              <div><b>Бөлім</b><b>Қызметкер</b><b>Айлық</b><b>ПС</b><b>Төлем түрі</b><b>Статус</b></div>
+              <div><b>Қызметкер</b><b>Лауазым</b><b>Айлық</b><b>ПС</b><b>Төлем түрі</b><b>Статус</b></div>
               {importRows.slice(0, 100).map((row, index) => (
-                <div key={`${row.fullName}-${index}`} className={row.error ? "error-row" : ""}><span>{row.department || "—"}</span><span>{row.fullName || "—"}</span><span>{formatMoney(row.baseSalary || 0)}</span><span>{formatMoney(row.ps || 0)}</span><span>{row.paymentMethod || "—"}</span><span>{row.error ?? "Дайын"}</span></div>
+                <div key={`${row.fullName}-${index}`} className={row.error ? "error-row" : ""}><span>{row.fullName || "—"}</span><span>{row.position || "—"}</span><span>{formatMoney(row.baseSalary || 0)}</span><span>{formatMoney(row.ps || 0)}</span><span>{row.paymentMethod || "—"}</span><span>{row.error ?? (row.isPaid ? "Төленді" : "Дайын")}</span></div>
               ))}
             </div>
-            <div className="modal-actions"><button className="ghost-button" onClick={() => setImportRows(null)}>Болдырмау</button><button className="primary-button" disabled={saving || importRows.some((row) => row.error)} onClick={() => void mutate("importEmployees", { rows: importRows })}>{saving ? "Импортталуда…" : `${importRows.length} қызметкерді импорттау`}</button></div>
+            <div className="modal-actions"><button className="ghost-button" onClick={() => setImportRows(null)}>Болдырмау</button><button className="primary-button" disabled={saving || importRows.some((row) => row.error)} onClick={() => void mutate("importEmployees", { rows: importRows, departmentId: selectedDepartment })}>{saving ? "Импортталуда…" : `${importRows.length} қызметкерді импорттау`}</button></div>
           </div>
         </Modal>
       )}

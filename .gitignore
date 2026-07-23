@@ -38,8 +38,15 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /outputs/
 /work/
 /tmp-dev.*.log
+
+# payroll source data
+*.xlsx
+*.xls
+*.csv
+*.tsv

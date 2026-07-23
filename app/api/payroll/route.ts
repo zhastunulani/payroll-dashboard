@@ -115,7 +115,7 @@ export async function POST(request: Request) {
       const employees = (
         await db
           .prepare(
-            `SELECT e.id, e.full_name, e.department_id, d.name AS department_name,
+            `SELECT e.id, e.full_name, e.position, e.department_id, d.name AS department_name,
                     e.payment_method_id, pm.name AS payment_method_name,
                     s.id AS source_snapshot_id, COALESCE(s.base_salary, 0) AS base_salary
              FROM employees e
@@ -129,6 +129,7 @@ export async function POST(request: Request) {
           .all<{
             id: string;
             full_name: string;
+            position: string;
             department_id: string;
             department_name: string;
             payment_method_id: string;
@@ -180,9 +181,9 @@ export async function POST(request: Request) {
           db
             .prepare(
               `INSERT INTO salary_snapshots
-               (id, month_id, employee_id, department_id, employee_name, department_name,
+               (id, month_id, employee_id, department_id, employee_name, position, department_name,
                 payment_method_id, payment_method_name, base_salary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -190,6 +191,7 @@ export async function POST(request: Request) {
               employee.id,
               employee.department_id,
               employee.full_name,
+              employee.position,
               employee.department_name,
               employee.payment_method_id,
               employee.payment_method_name,
@@ -264,6 +266,7 @@ export async function POST(request: Request) {
         ? text(body.employeeId, "Қызметкер")
         : crypto.randomUUID();
       const fullName = text(body.fullName, "Қызметкер аты");
+      const position = String(body.position ?? "").trim().slice(0, 120);
       const departmentId = text(body.departmentId, "Бөлім");
       const paymentMethodId = text(body.paymentMethodId, "Төлем түрі");
       const baseSalary = money(body.baseSalary, "Негізгі айлық");
@@ -317,19 +320,19 @@ export async function POST(request: Request) {
         statements.push(
           db
             .prepare(
-              `UPDATE employees SET full_name = ?, department_id = ?, payment_method_id = ?,
+              `UPDATE employees SET full_name = ?, position = ?, department_id = ?, payment_method_id = ?,
                updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             )
-            .bind(fullName, departmentId, paymentMethodId, employeeId),
+            .bind(fullName, position, departmentId, paymentMethodId, employeeId),
         );
       } else {
         statements.push(
           db
             .prepare(
               `INSERT INTO employees
-               (id, full_name, department_id, payment_method_id) VALUES (?, ?, ?, ?)`,
+               (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)`,
             )
-            .bind(employeeId, fullName, departmentId, paymentMethodId),
+            .bind(employeeId, fullName, position, departmentId, paymentMethodId),
         );
       }
       const snapshotId = currentSnapshot?.id ?? crypto.randomUUID();
@@ -338,7 +341,7 @@ export async function POST(request: Request) {
           db
             .prepare(
               `UPDATE salary_snapshots
-               SET employee_name = ?, department_id = ?, department_name = ?,
+               SET employee_name = ?, position = ?, department_id = ?, department_name = ?,
                    payment_method_id = ?, payment_method_name = ?, base_salary = ?,
                    is_paid = CASE WHEN ? THEN 0 ELSE is_paid END,
                    paid_at = CASE WHEN ? THEN NULL ELSE paid_at END,
@@ -347,6 +350,7 @@ export async function POST(request: Request) {
             )
             .bind(
               fullName,
+              position,
               departmentId,
               department.name,
               paymentMethodId,
@@ -367,9 +371,9 @@ export async function POST(request: Request) {
           db
             .prepare(
               `INSERT INTO salary_snapshots
-               (id, month_id, employee_id, department_id, employee_name, department_name,
+               (id, month_id, employee_id, department_id, employee_name, position, department_name,
                 payment_method_id, payment_method_name, base_salary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -377,6 +381,7 @@ export async function POST(request: Request) {
               employeeId,
               departmentId,
               fullName,
+              position,
               department.name,
               paymentMethodId,
               method.name,
@@ -621,6 +626,14 @@ export async function POST(request: Request) {
       const departmentMap = new Map(
         departmentRows.map((department) => [department.name.toLocaleLowerCase("kk-KZ"), department]),
       );
+      const forcedDepartment = body.departmentId
+        ? departmentRows.find(
+            (department) => department.id === text(body.departmentId, "Бөлім"),
+          )
+        : undefined;
+      if (body.departmentId && !forcedDepartment) {
+        throw new Error("Импорт жасалатын бөлім табылмады.");
+      }
       const methodMap = new Map(
         methodRows.map((method) => [method.name.toLocaleLowerCase("kk-KZ"), method]),
       );
@@ -636,9 +649,13 @@ export async function POST(request: Request) {
       const statements = [];
       for (const raw of body.rows) {
         const row = raw as Record<string, unknown>;
-        const departmentName = text(row.department, "Бөлім");
+        const departmentName =
+          forcedDepartment?.name ?? text(row.department, "Бөлім");
         const fullName = text(row.fullName, "Қызметкер");
-        const department = departmentMap.get(departmentName.toLocaleLowerCase("kk-KZ"));
+        const position = String(row.position ?? "").trim().slice(0, 120);
+        const department =
+          forcedDepartment ??
+          departmentMap.get(departmentName.toLocaleLowerCase("kk-KZ"));
         const methodName = text(row.paymentMethod, "Төлем түрі");
         const method = methodMap.get(methodName.toLocaleLowerCase("kk-KZ"));
         if (!department) throw new Error(`Белгісіз бөлім: ${departmentName}`);
@@ -653,15 +670,15 @@ export async function POST(request: Request) {
         statements.push(
           db
             .prepare(
-              "INSERT INTO employees (id, full_name, department_id, payment_method_id) VALUES (?, ?, ?, ?)",
+              "INSERT INTO employees (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)",
             )
-            .bind(employeeId, fullName, department.id, method.id),
+            .bind(employeeId, fullName, position, department.id, method.id),
           db
             .prepare(
               `INSERT INTO salary_snapshots
-               (id, month_id, employee_id, department_id, employee_name, department_name,
-                payment_method_id, payment_method_name, base_salary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (id, month_id, employee_id, department_id, employee_name, position, department_name,
+                payment_method_id, payment_method_name, base_salary, is_paid, paid_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -669,10 +686,13 @@ export async function POST(request: Request) {
               employeeId,
               department.id,
               fullName,
+              position,
               department.name,
               method.id,
               method.name,
               money(row.baseSalary, "Негізгі айлық"),
+              flag(row.isPaid) ? 1 : 0,
+              flag(row.isPaid) ? new Date().toISOString() : null,
             ),
         );
         const ps = money(row.ps ?? 0, "ПС");

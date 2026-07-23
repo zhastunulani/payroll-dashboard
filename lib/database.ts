@@ -1,5 +1,5 @@
-import { env } from "cloudflare:workers";
 import { buildBreakdown, computeStats, monthLabel, salaryTotal } from "./calculations";
+import { PostgresDatabase } from "./postgres-database";
 import type {
   ExpenseRecord,
   PayrollData,
@@ -8,26 +8,35 @@ import type {
 } from "./types";
 
 type RuntimeEnv = {
-  DB?: D1Database;
+  DATABASE_URL?: string;
   APP_PASSWORD_HASH?: string;
   SESSION_SECRET?: string;
-  PASSWORD_BOOTSTRAP_SECRET?: string;
 };
 
 let initialization: Promise<void> | null = null;
+let database: PostgresDatabase | null = null;
 
 export function runtimeEnv(): RuntimeEnv {
-  return env as unknown as RuntimeEnv;
+  return {
+    DATABASE_URL: process.env.DATABASE_URL,
+    APP_PASSWORD_HASH: process.env.APP_PASSWORD_HASH,
+    SESSION_SECRET: process.env.SESSION_SECRET,
+  };
 }
 
-export function getRawDb(): D1Database {
-  const db = runtimeEnv().DB;
-  if (!db) throw new Error("D1 дерекқоры қолжетімсіз.");
-  return db;
+export function getRawDb(): PostgresDatabase {
+  if (database) return database;
+  const connectionString = runtimeEnv().DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL бапталмаған.");
+  database = new PostgresDatabase(connectionString);
+  return database;
 }
 
 export async function ensureDatabase(): Promise<void> {
-  initialization ??= initializeDatabase();
+  initialization ??= initializeDatabase().catch((error) => {
+    initialization = null;
+    throw error;
+  });
   return initialization;
 }
 
@@ -39,35 +48,36 @@ async function initializeDatabase(): Promise<void> {
       year INTEGER NOT NULL,
       month INTEGER NOT NULL,
       source_month_id TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS months_year_month_idx ON months(year, month)`,
     `CREATE TABLE IF NOT EXISTS departments (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sort_order INTEGER NOT NULL DEFAULT 0,
-      archived_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      archived_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS payment_methods (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sort_order INTEGER NOT NULL DEFAULT 0,
       is_system INTEGER NOT NULL DEFAULT 0,
-      archived_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      archived_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS employees (
       id TEXT PRIMARY KEY,
       full_name TEXT NOT NULL,
+      position TEXT NOT NULL DEFAULT '',
       department_id TEXT NOT NULL,
       payment_method_id TEXT NOT NULL,
-      archived_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      archived_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS salary_snapshots (
       id TEXT PRIMARY KEY,
@@ -75,14 +85,15 @@ async function initializeDatabase(): Promise<void> {
       employee_id TEXT NOT NULL,
       department_id TEXT NOT NULL,
       employee_name TEXT NOT NULL,
+      position TEXT NOT NULL DEFAULT '',
       department_name TEXT NOT NULL,
       payment_method_id TEXT NOT NULL,
       payment_method_name TEXT NOT NULL,
       base_salary INTEGER NOT NULL DEFAULT 0,
       is_paid INTEGER NOT NULL DEFAULT 0,
-      paid_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS salary_month_employee_idx ON salary_snapshots(month_id, employee_id)`,
     `CREATE INDEX IF NOT EXISTS salary_month_idx ON salary_snapshots(month_id)`,
@@ -92,17 +103,17 @@ async function initializeDatabase(): Promise<void> {
       name TEXT NOT NULL,
       kind TEXT NOT NULL CHECK(kind IN ('addition', 'deduction')),
       amount INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS salary_components_snapshot_idx ON salary_components(salary_snapshot_id)`,
     `CREATE TABLE IF NOT EXISTS expense_categories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sort_order INTEGER NOT NULL DEFAULT 0,
-      archived_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      archived_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS expenses (
       id TEXT PRIMARY KEY,
@@ -113,15 +124,15 @@ async function initializeDatabase(): Promise<void> {
       amount INTEGER NOT NULL DEFAULT 0,
       is_recurring INTEGER NOT NULL DEFAULT 1,
       is_paid INTEGER NOT NULL DEFAULT 0,
-      paid_at TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS expenses_month_idx ON expenses(month_id)`,
     `CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
   ];
   await db.batch(statements.map((statement) => db.prepare(statement)));
@@ -132,7 +143,14 @@ async function initializeDatabase(): Promise<void> {
   const monthId = `${year}-${String(month).padStart(2, "0")}`;
 
   const seedStatements = [
-    db.prepare("INSERT OR IGNORE INTO months (id, year, month) VALUES (?, ?, ?)").bind(monthId, year, month),
+    db
+      .prepare(
+        `INSERT INTO months (id, year, month)
+         SELECT ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM months)
+         ON CONFLICT DO NOTHING`,
+      )
+      .bind(monthId, year, month),
     ...[
       ["dept-academ", "Академ", 1],
       ["dept-teachers", "Мұғалімдер", 2],
@@ -207,6 +225,7 @@ type SalaryRow = {
   id: string;
   employee_id: string;
   employee_name: string;
+  position: string;
   department_id: string;
   department_name: string;
   payment_method_id: string;
@@ -227,7 +246,7 @@ type ComponentRow = {
 
 async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
   const rows = await queryAll<SalaryRow>(
-    `SELECT s.id, s.employee_id, s.employee_name, s.department_id, s.department_name,
+    `SELECT s.id, s.employee_id, s.employee_name, s.position, s.department_id, s.department_name,
             s.payment_method_id, s.payment_method_name, s.base_salary, s.is_paid,
             s.paid_at, e.archived_at
      FROM salary_snapshots s
@@ -261,6 +280,7 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
       id: row.id,
       employeeId: row.employee_id,
       employeeName: row.employee_name,
+      position: row.position,
       departmentId: row.department_id,
       departmentName: row.department_name,
       paymentMethodId: row.payment_method_id,

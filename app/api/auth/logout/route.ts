@@ -1,9 +1,14 @@
-import { clearSessionCookie } from "@/lib/auth";
+import { clearSessionCookie, isSecureRequest } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  const secure = new URL(request.url).protocol === "https:";
+  const secure = isSecureRequest(request);
   return Response.json(
     { ok: true },
-    { headers: { "Set-Cookie": clearSessionCookie(secure) } },
+    {
+      headers: {
+        "Set-Cookie": clearSessionCookie(secure),
+        "Cache-Control": "no-store",
+      },
+    },
   );
 }

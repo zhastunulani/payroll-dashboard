@@ -1,5 +1,10 @@
 import { cookies } from "next/headers";
-import { ensureDatabase, getSetting, runtimeEnv, setSetting } from "./database";
+import {
+  ensureDatabase,
+  getRawDb,
+  getSetting,
+  runtimeEnv,
+} from "./database";
 
 export const SESSION_COOKIE = "payroll_session";
 const SESSION_SECONDS = 60 * 60 * 12;
@@ -170,11 +175,30 @@ export function clearSessionCookie(secure: boolean): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
+export function isSecureRequest(request: Request): boolean {
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  return (
+    forwardedProtocol === "https" ||
+    new URL(request.url).protocol === "https:" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
 export async function changeSharedPassword(nextPassword: string): Promise<void> {
   if (nextPassword.length < 10) {
     throw new Error("Жаңа пароль кемінде 10 таңбадан тұруы керек.");
   }
   const currentVersion = Number((await getSetting("session_version")) ?? "1");
-  await setSetting("password_hash", await hashPassword(nextPassword));
-  await setSetting("session_version", String(currentVersion + 1));
+  const nextHash = await hashPassword(nextPassword);
+  const db = getRawDb();
+  const upsert = `INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`;
+  await db.batch([
+    db.prepare(upsert).bind("password_hash", nextHash),
+    db.prepare(upsert).bind("session_version", String(currentVersion + 1)),
+  ]);
 }

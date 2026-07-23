@@ -472,7 +472,9 @@ input, select { color: var(--ink); }
 .archived-row { opacity: .6; background: #fafafa; }
 .person-cell { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 9px; color: var(--ink); }
 .person-cell > i { width: 34px; height: 34px; border-radius: 9px; color: var(--primary); background: var(--primary-soft); display: grid; place-items: center; font-style: normal; font-weight: 800; }
+.person-cell > span { min-width: 0; display: grid; gap: 2px; }
 .person-cell b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.person-cell small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .person-cell em, .settings-list em { padding: 3px 5px; border-radius: 5px; color: var(--muted); background: #f0f2f5; font-size: 7px; font-style: normal; font-weight: 700; }
 .method-chip { display: inline-flex; padding: 5px 8px; border-radius: 7px; color: #4e5e9e; background: #f0f2ff; font-size: 8px; font-weight: 700; }
 .money-cell { text-align: right; font-variant-numeric: tabular-nums; }

@@ -3,7 +3,7 @@ import { ensureDatabase, getSetting, runtimeEnv, setSetting } from "./database";
 
 export const SESSION_COOKIE = "payroll_session";
 const SESSION_SECONDS = 60 * 60 * 12;
-const HASH_ITERATIONS = 120_000;
+const HASH_ITERATIONS = 100_000;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";

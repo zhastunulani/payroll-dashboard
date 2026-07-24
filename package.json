@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "hash-password": "node scripts/hash-password.mjs",
-    "test:unit": "node --experimental-transform-types --test tests/calculations.test.ts tests/postgres-database.test.ts tests/money.test.ts tests/months.test.ts tests/expenses.test.ts tests/keep-alive.test.ts",
+    "test:unit": "node --experimental-transform-types --test tests/calculations.test.ts tests/postgres-database.test.ts tests/money.test.ts tests/months.test.ts tests/payroll-import.test.ts tests/bulk-employees.test.ts tests/expenses.test.ts tests/keep-alive.test.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern outputs"

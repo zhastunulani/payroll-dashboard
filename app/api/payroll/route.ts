@@ -11,6 +11,7 @@ import {
   OTHER_EXPENSE_CATEGORY_ID,
   OTHER_EXPENSE_CATEGORY_NAME,
 } from "@/lib/expenses";
+import { EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH } from "@/lib/months";
 import type { SalaryComponentKind } from "@/lib/types";
 
 type ActionBody = {
@@ -36,6 +37,20 @@ function money(value: unknown, label: string): number {
 
 function flag(value: unknown): boolean {
   return value === true || value === 1 || value === "1";
+}
+
+function idList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || !value.length) {
+    throw new Error(`${label} таңдалмады.`);
+  }
+  if (value.length > 2_000) {
+    throw new Error(`${label} саны 2000-нан аспауы керек.`);
+  }
+  return [
+    ...new Set(
+      value.map((item) => text(item, label, 120)),
+    ),
+  ];
 }
 
 function monthId(value: unknown): string {
@@ -131,9 +146,10 @@ export async function POST(request: Request) {
              JOIN payment_methods pm ON pm.id = e.payment_method_id
              LEFT JOIN salary_snapshots s ON s.employee_id = e.id AND s.month_id = ?
              WHERE e.archived_at IS NULL AND d.archived_at IS NULL
+               AND e.department_id NOT IN (?, ?)
              ORDER BY d.sort_order, e.full_name`,
           )
-          .bind(sourceId)
+          .bind(sourceId, ...EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH)
           .all<{
             id: string;
             full_name: string;
@@ -250,20 +266,60 @@ export async function POST(request: Request) {
     }
 
     if (action === "toggleSalaryPaid") {
+      const selectedMonth = monthId(body.monthId);
       const id = text(body.id, "Айлық");
       const paid = flag(body.isPaid);
       await db
         .prepare(
           `UPDATE salary_snapshots
            SET is_paid = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
+           WHERE id = ? AND month_id = ?`,
         )
-        .bind(paid ? 1 : 0, paid ? new Date().toISOString() : null, id)
+        .bind(
+          paid ? 1 : 0,
+          paid ? new Date().toISOString() : null,
+          id,
+          selectedMonth,
+        )
+        .run();
+    } else if (action === "setSalaryPaidBulk") {
+      const selectedMonth = monthId(body.monthId);
+      const salaryIds = idList(body.ids, "Айлық");
+      const paid = flag(body.isPaid);
+      const placeholders = salaryIds.map(() => "?").join(", ");
+      await db
+        .prepare(
+          `UPDATE salary_snapshots
+           SET is_paid = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE month_id = ? AND id IN (${placeholders})`,
+        )
+        .bind(
+          paid ? 1 : 0,
+          paid ? new Date().toISOString() : null,
+          selectedMonth,
+          ...salaryIds,
+        )
         .run();
     } else if (action === "toggleExpensePaid") {
       const selectedMonth = monthId(body.monthId);
       const id = text(body.id, "Шығын");
       const paid = flag(body.isPaid);
+      const current = await db
+        .prepare(
+          `SELECT category_id, is_recurring
+           FROM expenses WHERE id = ? AND month_id = ?`,
+        )
+        .bind(id, selectedMonth)
+        .first<{ category_id: string; is_recurring: number }>();
+      if (!current) throw new Error("Шығын табылмады.");
+      if (
+        current.category_id === OTHER_EXPENSE_CATEGORY_ID &&
+        current.is_recurring === 0
+      ) {
+        throw new Error(
+          "«Басқа шығындар» реестріндегі ақша жұмсалған болып есептеледі.",
+        );
+      }
       await db
         .prepare(
           `UPDATE expenses SET is_paid = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
@@ -274,6 +330,42 @@ export async function POST(request: Request) {
           paid ? new Date().toISOString() : null,
           id,
           selectedMonth,
+        )
+        .run();
+    } else if (action === "setExpensePaidBulk") {
+      const selectedMonth = monthId(body.monthId);
+      const expenseIds = idList(body.ids, "Шығын");
+      const paid = flag(body.isPaid);
+      const placeholders = expenseIds.map(() => "?").join(", ");
+      await db
+        .prepare(
+          `UPDATE expenses
+           SET is_paid = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE month_id = ? AND id IN (${placeholders})
+             AND (category_id <> ? OR is_recurring <> 0)`,
+        )
+        .bind(
+          paid ? 1 : 0,
+          paid ? new Date().toISOString() : null,
+          selectedMonth,
+          ...expenseIds,
+          OTHER_EXPENSE_CATEGORY_ID,
+        )
+        .run();
+    } else if (action === "deleteExpensesBulk") {
+      const selectedMonth = monthId(body.monthId);
+      const expenseIds = idList(body.ids, "Шығын");
+      const placeholders = expenseIds.map(() => "?").join(", ");
+      await db
+        .prepare(
+          `DELETE FROM expenses
+           WHERE month_id = ? AND id IN (${placeholders})
+             AND (category_id <> ? OR is_recurring <> 0)`,
+        )
+        .bind(
+          selectedMonth,
+          ...expenseIds,
+          OTHER_EXPENSE_CATEGORY_ID,
         )
         .run();
     } else if (action === "saveEmployee") {
@@ -438,6 +530,47 @@ export async function POST(request: Request) {
           .bind(id),
         db.prepare("DELETE FROM employees WHERE id = ?").bind(id),
       ]);
+    } else if (action === "deleteEmployeesBulk") {
+      const selectedMonth = monthId(body.monthId);
+      const requestedIds = idList(body.employeeIds, "Қызметкер");
+      const requestedPlaceholders = requestedIds.map(() => "?").join(", ");
+      const matched = (
+        await db
+          .prepare(
+            `SELECT DISTINCT employee_id
+             FROM salary_snapshots
+             WHERE month_id = ? AND employee_id IN (${requestedPlaceholders})`,
+          )
+          .bind(selectedMonth, ...requestedIds)
+          .all<{ employee_id: string }>()
+      ).results;
+      const employeeIds = matched.map((employee) => employee.employee_id);
+      if (!employeeIds.length) {
+        throw new Error("Өшірілетін қызметкерлер табылмады.");
+      }
+      const placeholders = employeeIds.map(() => "?").join(", ");
+      await db.batch([
+        db
+          .prepare(
+            `DELETE FROM salary_components
+             WHERE salary_snapshot_id IN (
+               SELECT id FROM salary_snapshots
+               WHERE employee_id IN (${placeholders})
+             )`,
+          )
+          .bind(...employeeIds),
+        db
+          .prepare(
+            `DELETE FROM salary_snapshots
+             WHERE employee_id IN (${placeholders})`,
+          )
+          .bind(...employeeIds),
+        db
+          .prepare(
+            `DELETE FROM employees WHERE id IN (${placeholders})`,
+          )
+          .bind(...employeeIds),
+      ]);
     } else if (action === "saveOneTimeExpense") {
       const selectedMonth = monthId(body.monthId);
       const id = body.id ? text(body.id, "Шығын") : crypto.randomUUID();
@@ -466,8 +599,8 @@ export async function POST(request: Request) {
             `UPDATE expenses
              SET category_id = ?, category_name = ?, name = ?, amount = ?,
                  is_recurring = 0,
-                 is_paid = CASE WHEN amount <> ? THEN 0 ELSE is_paid END,
-                 paid_at = CASE WHEN amount <> ? THEN NULL ELSE paid_at END,
+                 is_paid = 1,
+                 paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND month_id = ?`,
           )
@@ -475,8 +608,6 @@ export async function POST(request: Request) {
             category.id,
             OTHER_EXPENSE_CATEGORY_NAME,
             name,
-            amount,
-            amount,
             amount,
             id,
             selectedMonth,
@@ -486,8 +617,9 @@ export async function POST(request: Request) {
         await db
           .prepare(
             `INSERT INTO expenses
-             (id, month_id, category_id, category_name, name, amount, is_recurring)
-             VALUES (?, ?, ?, ?, ?, ?, 0)`,
+             (id, month_id, category_id, category_name, name, amount,
+              is_recurring, is_paid, paid_at)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP)`,
           )
           .bind(
             id,
@@ -506,6 +638,15 @@ export async function POST(request: Request) {
       const categoryId = text(body.categoryId, "Категория");
       const amount = money(body.amount, "Шығын сомасы");
       const recurring = flag(body.isRecurring);
+      if (
+        categoryId === OTHER_EXPENSE_CATEGORY_ID &&
+        !recurring &&
+        !body.id
+      ) {
+        throw new Error(
+          "Бір реттік шығынды «Басқа шығындар» реестрінен қосыңыз.",
+        );
+      }
       const category = await db
         .prepare("SELECT name FROM expense_categories WHERE id = ? AND archived_at IS NULL")
         .bind(categoryId)
@@ -754,6 +895,20 @@ export async function POST(request: Request) {
           .all<{ name: string; department_id: string }>()
       ).results;
       const duplicateKeys = new Set(existing.map((row) => `${row.department_id}:${row.name}`));
+      const reusableEmployees = (
+        await db
+          .prepare(
+            `SELECT id, LOWER(full_name) AS name, department_id
+             FROM employees WHERE archived_at IS NULL`,
+          )
+          .all<{ id: string; name: string; department_id: string }>()
+      ).results;
+      const reusableEmployeeMap = new Map(
+        reusableEmployees.map((employee) => [
+          `${employee.department_id}:${employee.name}`,
+          employee.id,
+        ]),
+      );
       const statements = [];
       for (const raw of body.rows) {
         const row = raw as Record<string, unknown>;
@@ -773,14 +928,57 @@ export async function POST(request: Request) {
           throw new Error(`Қайталанған қызметкер: ${fullName}`);
         }
         duplicateKeys.add(duplicateKey);
-        const employeeId = crypto.randomUUID();
+        const importedComponents = Array.isArray(row.components)
+          ? components(row.components)
+          : row.ps
+            ? [
+                {
+                  name: "ПС",
+                  kind: "addition" as const,
+                  amount: money(row.ps, "ПС"),
+                },
+              ]
+            : [];
+        if (importedComponents.length > 100) {
+          throw new Error(`${fullName}: қосымша сома саны тым көп.`);
+        }
+        const importedBaseSalary = money(row.baseSalary, "Негізгі айлық");
+        const importedSalary = importedComponents.reduce(
+          (total, component) =>
+            total +
+            (component.kind === "deduction"
+              ? -component.amount
+              : component.amount),
+          importedBaseSalary,
+        );
+        if (importedSalary < 0) {
+          throw new Error(`${fullName}: негізгі айлық дұрыс емес.`);
+        }
+        const employeeId =
+          reusableEmployeeMap.get(duplicateKey) ?? crypto.randomUUID();
         const snapshotId = crypto.randomUUID();
+        if (!reusableEmployeeMap.has(duplicateKey)) {
+          statements.push(
+            db
+              .prepare(
+                "INSERT INTO employees (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)",
+              )
+              .bind(employeeId, fullName, position, department.id, method.id),
+          );
+          reusableEmployeeMap.set(duplicateKey, employeeId);
+        } else {
+          statements.push(
+            db
+              .prepare(
+                `UPDATE employees
+                 SET full_name = ?, position = ?, payment_method_id = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+              )
+              .bind(fullName, position, method.id, employeeId),
+          );
+        }
         statements.push(
-          db
-            .prepare(
-              "INSERT INTO employees (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(employeeId, fullName, position, department.id, method.id),
           db
             .prepare(
               `INSERT INTO salary_snapshots
@@ -798,22 +996,11 @@ export async function POST(request: Request) {
               department.name,
               method.id,
               method.name,
-              money(row.baseSalary, "Негізгі айлық"),
+              importedSalary,
               flag(row.isPaid) ? 1 : 0,
               flag(row.isPaid) ? new Date().toISOString() : null,
             ),
         );
-        const ps = money(row.ps ?? 0, "ПС");
-        if (ps > 0) {
-          statements.push(
-            db
-              .prepare(
-                `INSERT INTO salary_components
-                 (id, salary_snapshot_id, name, kind, amount) VALUES (?, ?, 'ПС', 'addition', ?)`,
-              )
-              .bind(crypto.randomUUID(), snapshotId, ps),
-          );
-        }
       }
       await db.batch(statements);
     } else {

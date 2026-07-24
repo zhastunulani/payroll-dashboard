@@ -1,5 +1,18 @@
 const MONTH_ID_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
+export const EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH = [
+  "dept-curators",
+  "dept-sales",
+] as const;
+
+export function shouldCopyDepartmentToNewMonth(
+  departmentId: string,
+): boolean {
+  return !EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH.some(
+    (excludedId) => excludedId === departmentId,
+  );
+}
+
 export function addMonths(monthId: string, offset: number): string {
   const match = MONTH_ID_PATTERN.exec(monthId);
   if (!match) throw new Error("Ай форматы YYYY-MM болуы керек.");

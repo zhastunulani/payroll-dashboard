@@ -39,6 +39,25 @@ test("new month copying and one-time saving use opposite recurring flags", async
     "utf8",
   );
   assert.match(route, /FROM expenses WHERE month_id = \? AND is_recurring = 1/);
-  assert.match(route, /VALUES \(\?, \?, \?, \?, \?, \?, 0\)/);
+  assert.match(
+    route,
+    /VALUES \(\?, \?, \?, \?, \?, \?, 0, 1, CURRENT_TIMESTAMP\)/,
+  );
+  assert.match(route, /is_paid = 1,/);
   assert.match(route, /WHERE id = \? AND month_id = \? AND category_id = \? AND is_recurring = 0/);
+});
+
+test("existing one-time other expenses are migrated to spent records", async () => {
+  const database = await readFile(
+    new URL("lib/database.ts", root),
+    "utf8",
+  );
+  assert.match(
+    database,
+    /SET is_paid = 1,\s+paid_at = COALESCE\(paid_at, created_at\)/,
+  );
+  assert.match(
+    database,
+    /WHERE category_id = \? AND is_recurring = 0/,
+  );
 });

@@ -216,6 +216,16 @@ async function initializeDatabase(): Promise<void> {
         OTHER_EXPENSE_CATEGORY_NAME,
       ),
     db
+      .prepare(
+        `UPDATE expenses
+         SET is_paid = 1,
+             paid_at = COALESCE(paid_at, created_at),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE category_id = ? AND is_recurring = 0
+           AND (is_paid <> 1 OR paid_at IS NULL)`,
+      )
+      .bind(OTHER_EXPENSE_CATEGORY_ID),
+    db
       .prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('session_version', '1')"),
   ];
   await db.batch(seedStatements);

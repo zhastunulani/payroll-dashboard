@@ -28,7 +28,7 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { readSheet } from "read-excel-file/browser";
+import readExcelFile from "read-excel-file/browser";
 import type {
   BreakdownItem,
   PayrollData,
@@ -41,7 +41,17 @@ import {
   OTHER_EXPENSE_CATEGORY_ID,
 } from "@/lib/expenses";
 import { formatMoney, formatMoneyInput, parseMoneyInput } from "@/lib/money";
-import { nextAvailableMonthId } from "@/lib/months";
+import {
+  nextAvailableMonthId,
+  shouldCopyDepartmentToNewMonth,
+} from "@/lib/months";
+import {
+  extractPayrollImportRow,
+  parseDelimitedGrid,
+  rowsFromGrid,
+  selectImportSheets,
+  type PayrollImportComponent,
+} from "@/lib/payroll-import";
 
 type View =
   | "dashboard"
@@ -50,6 +60,12 @@ type View =
   | "other-expenses"
   | "settings";
 type EntityType = "department" | "method" | "category";
+type SettingsSection =
+  | "employees"
+  | "departments"
+  | "methods"
+  | "categories"
+  | "security";
 
 function MoneyInput({
   value,
@@ -75,123 +91,6 @@ function MoneyInput({
       <b>₸</b>
     </div>
   );
-}
-
-function normalizedHeader(value: string): string {
-  return value
-    .trim()
-    .toLocaleLowerCase("kk-KZ")
-    .replace(/[._-]+/g, " ")
-    .replace(/\s+/g, " ");
-}
-
-function columnValue(
-  row: Record<string, unknown>,
-  aliases: string[],
-): unknown {
-  const values = new Map(
-    Object.entries(row).map(([key, value]) => [normalizedHeader(key), value]),
-  );
-  for (const alias of aliases) {
-    const value = values.get(normalizedHeader(alias));
-    if (value !== undefined && value !== null && String(value).trim() !== "") {
-      return value;
-    }
-  }
-  return "";
-}
-
-function parseDelimitedRows(content: string): Record<string, unknown>[] {
-  const source = content.replace(/^\uFEFF/, "");
-  const firstLine = source.split(/\r?\n/, 1)[0] ?? "";
-  const delimiter = [",", ";", "\t"].sort(
-    (left, right) =>
-      firstLine.split(right).length - firstLine.split(left).length,
-  )[0];
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let value = "";
-  let quoted = false;
-
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    if (character === '"') {
-      if (quoted && source[index + 1] === '"') {
-        value += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (character === delimiter && !quoted) {
-      row.push(value);
-      value = "";
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      if (character === "\r" && source[index + 1] === "\n") index += 1;
-      row.push(value);
-      if (row.some((cell) => cell.trim() !== "")) rows.push(row);
-      row = [];
-      value = "";
-    } else {
-      value += character;
-    }
-  }
-  row.push(value);
-  if (row.some((cell) => cell.trim() !== "")) rows.push(row);
-
-  const headers = (rows.shift() ?? []).map((header) => header.trim());
-  return rows.map((cells) =>
-    Object.fromEntries(
-      headers.map((header, index) => [header, cells[index]?.trim() ?? ""]),
-    ),
-  );
-}
-
-function parseMoneyValue(value: unknown): number {
-  if (typeof value === "number") return Math.round(value);
-  const source = String(value ?? "").trim();
-  if (!source) return 0;
-  const normalized = source
-    .replace(/\u00a0/g, "")
-    .replace(/[^\d-]/g, "");
-  if (!normalized || normalized === "-") return Number.NaN;
-  const amount = Number(normalized);
-  return Number.isFinite(amount) ? amount : Number.NaN;
-}
-
-function parsePaidValue(value: unknown): boolean {
-  if (value === true || value === 1) return true;
-  return ["true", "иә", "да", "төленді", "оплачено", "+"].includes(
-    String(value ?? "").trim().toLocaleLowerCase("kk-KZ"),
-  );
-}
-
-const MONTH_IMPORT_HEADERS = [
-  ["Қаңтар", "Январь"],
-  ["Ақпан", "Февраль"],
-  ["Наурыз", "Март"],
-  ["Сәуір", "Апрель"],
-  ["Мамыр", "Май"],
-  ["Маусым", "Июнь"],
-  ["Шілде", "Июль"],
-  ["Тамыз", "Август"],
-  ["Қыркүйек", "Сентябрь"],
-  ["Қазан", "Октябрь"],
-  ["Қараша", "Ноябрь"],
-  ["Желтоқсан", "Декабрь"],
-];
-
-function normalizePaymentMethod(value: unknown, fallback: string): string {
-  const method = String(value ?? "").trim();
-  const normalized = method.toLocaleLowerCase("kk-KZ").replace(/\s+/g, " ");
-  if (!normalized || normalized === "/+пс") return fallback;
-  if (normalized.includes("официально") && normalized.includes("ип")) {
-    return "Ресми + ЖК";
-  }
-  if (normalized === "официально") return "Ресми";
-  if (normalized === "ип") return "ЖК";
-  if (normalized.includes("самозанят")) return "Өзін-өзі жұмыспен қамтыған";
-  if (normalized.includes("перевод")) return "Аударым";
-  return method;
 }
 
 function changePercent(current: number, previous?: number): number | null {
@@ -273,17 +172,19 @@ function Modal({
   children,
   onClose,
   wide = false,
+  extraWide = false,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   onClose: () => void;
   wide?: boolean;
+  extraWide?: boolean;
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={`modal ${wide ? "wide" : ""}`}
+        className={`modal ${wide ? "wide" : ""} ${extraWide ? "extra-wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -422,14 +323,25 @@ type ImportRow = {
   fullName: string;
   position: string;
   baseSalary: number;
-  ps: number;
+  components: PayrollImportComponent[];
   paymentMethod: string;
   isPaid: boolean;
   error?: string;
 };
 
+function importRowTotal(row: ImportRow): number {
+  return row.components.reduce(
+    (total, component) =>
+      total +
+      (component.kind === "deduction" ? -component.amount : component.amount),
+    row.baseSalary,
+  );
+}
+
 export function PayrollApp() {
   const [view, setView] = useState<View>("dashboard");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("employees");
   const [data, setData] = useState<PayrollData | null>(null);
   const [month, setMonth] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("");
@@ -450,7 +362,17 @@ export function PayrollApp() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordDraft, setPasswordDraft] = useState("");
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
+  const [monthMenuOpen, setMonthMenuOpen] = useState(false);
+  const [employeeSelectionMode, setEmployeeSelectionMode] = useState(false);
+  const [selectedSalaryIds, setSelectedSalaryIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expenseSelectionMode, setExpenseSelectionMode] = useState(false);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const importInput = useRef<HTMLInputElement>(null);
+  const monthPicker = useRef<HTMLDivElement>(null);
 
   async function load(targetMonth?: string, initial = false) {
     if (!initial) {
@@ -468,6 +390,10 @@ export function PayrollApp() {
       if (!response.ok) throw new Error(result.error ?? "Деректер жүктелмеді.");
       setData(result);
       setMonth(result.selectedMonth.id);
+      setEmployeeSelectionMode(false);
+      setSelectedSalaryIds(new Set());
+      setExpenseSelectionMode(false);
+      setSelectedExpenseIds(new Set());
       setSelectedDepartment((current) => {
         if (result.departments.some((department) => department.id === current)) return current;
         return result.departments.find((department) => !department.archivedAt)?.id ?? "";
@@ -484,6 +410,28 @@ export function PayrollApp() {
       void load(undefined, true);
     }, 0);
     return () => window.clearTimeout(initialLoad);
+  }, []);
+
+  useEffect(() => {
+    function closeMonthMenu(event: MouseEvent) {
+      if (
+        monthPicker.current &&
+        !monthPicker.current.contains(event.target as Node)
+      ) {
+        setMonthMenuOpen(false);
+      }
+    }
+
+    function closeMonthMenuWithKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape") setMonthMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeMonthMenu);
+    document.addEventListener("keydown", closeMonthMenuWithKeyboard);
+    return () => {
+      document.removeEventListener("mousedown", closeMonthMenu);
+      document.removeEventListener("keydown", closeMonthMenuWithKeyboard);
+    };
   }, []);
 
   async function mutate(
@@ -520,6 +468,10 @@ export function PayrollApp() {
       setEntityDraft(null);
       setImportRows(null);
       setMonthDraft(null);
+      setEmployeeSelectionMode(false);
+      setSelectedSalaryIds(new Set());
+      setExpenseSelectionMode(false);
+      setSelectedExpenseIds(new Set());
       return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Әрекет орындалмады.");
@@ -534,9 +486,41 @@ export function PayrollApp() {
     window.location.reload();
   }
 
+  function changeView(nextView: View) {
+    if (nextView !== "departments") {
+      setEmployeeSelectionMode(false);
+      setSelectedSalaryIds(new Set());
+    }
+    if (nextView !== "expenses") {
+      setExpenseSelectionMode(false);
+      setSelectedExpenseIds(new Set());
+    }
+    setView(nextView);
+  }
+
+  function openEmployeeSettings() {
+    setSettingsSection("employees");
+    changeView("settings");
+  }
+
   const currentDepartment = data?.departments.find(
     (department) => department.id === selectedDepartment,
   );
+  const copyableEmployeeCount =
+    data?.departments
+      .filter((department) =>
+        shouldCopyDepartmentToNewMonth(department.id),
+      )
+      .reduce(
+        (total, department) => total + department.employees.length,
+        0,
+      ) ?? 0;
+  const copyableSalaryTotal =
+    data?.departments
+      .filter((department) =>
+        shouldCopyDepartmentToNewMonth(department.id),
+      )
+      .reduce((total, department) => total + department.total, 0) ?? 0;
   const filteredEmployees = useMemo(() => {
     if (!currentDepartment) return [];
     const query = search.trim().toLocaleLowerCase("kk-KZ");
@@ -547,6 +531,126 @@ export function PayrollApp() {
         employee.paymentMethodName.toLocaleLowerCase("kk-KZ").includes(query),
     );
   }, [currentDepartment, search]);
+  const selectedEmployees = useMemo(
+    () =>
+      currentDepartment?.employees.filter((employee) =>
+        selectedSalaryIds.has(employee.id),
+      ) ?? [],
+    [currentDepartment, selectedSalaryIds],
+  );
+  const allEmployeesSelected =
+    Boolean(currentDepartment?.employees.length) &&
+    currentDepartment?.employees.every((employee) =>
+      selectedSalaryIds.has(employee.id),
+    );
+  const selectableExpenses = useMemo(
+    () =>
+      data?.expenses.filter(
+        (expense) => !isOneTimeOtherExpense(expense),
+      ) ?? [],
+    [data],
+  );
+  const selectedExpenses = useMemo(
+    () =>
+      selectableExpenses.filter((expense) =>
+        selectedExpenseIds.has(expense.id),
+      ),
+    [selectableExpenses, selectedExpenseIds],
+  );
+  const allExpensesSelected =
+    Boolean(selectableExpenses.length) &&
+    selectableExpenses.every((expense) =>
+      selectedExpenseIds.has(expense.id),
+    );
+
+  function toggleEmployeeSelection(snapshotId: string) {
+    setSelectedSalaryIds((current) => {
+      const next = new Set(current);
+      if (next.has(snapshotId)) next.delete(snapshotId);
+      else next.add(snapshotId);
+      return next;
+    });
+  }
+
+  function toggleAllEmployees() {
+    if (!currentDepartment) return;
+    setEmployeeSelectionMode(true);
+    setSelectedSalaryIds(
+      allEmployeesSelected
+        ? new Set()
+        : new Set(
+            currentDepartment.employees.map((employee) => employee.id),
+          ),
+    );
+  }
+
+  function closeEmployeeSelection() {
+    setEmployeeSelectionMode(false);
+    setSelectedSalaryIds(new Set());
+  }
+
+  async function setSelectedEmployeesPaid(isPaid: boolean) {
+    if (!selectedEmployees.length) return;
+    await mutate("setSalaryPaidBulk", {
+      ids: selectedEmployees.map((employee) => employee.id),
+      isPaid,
+    });
+  }
+
+  async function deleteSelectedEmployees() {
+    if (!selectedEmployees.length) return;
+    const confirmed = window.confirm(
+      `${selectedEmployees.length} қызметкер және олардың барлық айлардағы айлық есептері толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
+    );
+    if (!confirmed) return;
+    await mutate("deleteEmployeesBulk", {
+      employeeIds: selectedEmployees.map(
+        (employee) => employee.employeeId,
+      ),
+    });
+  }
+
+  function toggleExpenseSelection(expenseId: string) {
+    setSelectedExpenseIds((current) => {
+      const next = new Set(current);
+      if (next.has(expenseId)) next.delete(expenseId);
+      else next.add(expenseId);
+      return next;
+    });
+  }
+
+  function toggleAllExpenses() {
+    setExpenseSelectionMode(true);
+    setSelectedExpenseIds(
+      allExpensesSelected
+        ? new Set()
+        : new Set(selectableExpenses.map((expense) => expense.id)),
+    );
+  }
+
+  function closeExpenseSelection() {
+    setExpenseSelectionMode(false);
+    setSelectedExpenseIds(new Set());
+  }
+
+  async function setSelectedExpensesPaid(isPaid: boolean) {
+    if (!selectedExpenses.length) return;
+    await mutate("setExpensePaidBulk", {
+      ids: selectedExpenses.map((expense) => expense.id),
+      isPaid,
+    });
+  }
+
+  async function deleteSelectedExpenses() {
+    if (!selectedExpenses.length) return;
+    const confirmed = window.confirm(
+      `${selectedExpenses.length} шығын толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
+    );
+    if (!confirmed) return;
+    await mutate("deleteExpensesBulk", {
+      ids: selectedExpenses.map((expense) => expense.id),
+    });
+  }
 
   function newEmployee() {
     if (!data) return;
@@ -593,8 +697,16 @@ export function PayrollApp() {
     const nextIndex = direction === "older" ? currentIndex + 1 : currentIndex - 1;
     const target = data.months[nextIndex];
     if (!target) return;
+    setMonthMenuOpen(false);
     setMonth(target.id);
     void load(target.id);
+  }
+
+  function selectMonth(targetMonth: string) {
+    setMonthMenuOpen(false);
+    if (targetMonth === month) return;
+    setMonth(targetMonth);
+    void load(targetMonth);
   }
 
   async function submitOneTimeExpense(event: FormEvent) {
@@ -633,24 +745,27 @@ export function PayrollApp() {
       const isCsv = file.name.toLocaleLowerCase("kk-KZ").endsWith(".csv");
       let rawRows: Record<string, unknown>[];
       if (isCsv) {
-        rawRows = parseDelimitedRows(
-          new TextDecoder("utf-8").decode(fileBuffer),
+        rawRows = rowsFromGrid(
+          parseDelimitedGrid(new TextDecoder("utf-8").decode(fileBuffer)),
         );
       } else {
-        const [headerRow = [], ...sheetRows] = await readSheet(fileBuffer);
-        const headers = headerRow.map((cell) => String(cell ?? "").trim());
-        rawRows = sheetRows
-          .filter((row) =>
-            row.some((cell) => String(cell ?? "").trim() !== ""),
-          )
-          .map((row) =>
-            Object.fromEntries(
-              headers.map((header, index) => [
-                header,
-                row[index] ?? "",
-              ]),
-            ),
-          );
+        const workbookSheets = await readExcelFile(fileBuffer);
+        const selectedSheets = selectImportSheets(
+          workbookSheets.map((sheet) => ({
+            sheet: sheet.sheet,
+            data: sheet.data as unknown[][],
+          })),
+          currentDepartment?.id ?? "",
+          currentDepartment?.name ?? "",
+        );
+        rawRows = selectedSheets.flatMap((sheet) =>
+          rowsFromGrid(sheet.data),
+        );
+      }
+      if (!rawRows.length) {
+        throw new Error(
+          "Аты-жөні бар кесте табылмады. Excel-де «ФИО» немесе «Аты-жөні» бағаны болуы керек.",
+        );
       }
       const knownDepartments = new Set(
         data.departments
@@ -667,8 +782,6 @@ export function PayrollApp() {
           ?.name ??
         data.paymentMethods.find((method) => !method.archivedAt)?.name ??
         "";
-      const selectedMonthHeaders =
-        MONTH_IMPORT_HEADERS[data.selectedMonth.month - 1] ?? [];
       const existing = new Set(
         data.salaries.map(
           (salary) =>
@@ -677,55 +790,40 @@ export function PayrollApp() {
       );
       const seen = new Set<string>();
       const rows = rawRows.map((row) => {
-        const department =
-          String(
-            columnValue(row, ["Бөлім", "Отдел"]) ||
-              currentDepartment?.name ||
-              "",
-          ).trim();
-        const fullName = String(
-          columnValue(row, [
-            "Қызметкер",
-            "ФИО",
-            "Аты-жөні",
-            "Сотрудник",
-            "Имя",
-          ]),
-        ).trim();
-        const position = String(
-          columnValue(row, ["Лауазым", "Должность", "Қызметі"]),
-        ).trim();
-        const paymentMethod = normalizePaymentMethod(
-          columnValue(row, [
-            "Төлем түрі",
-            "Төлем форматы",
-            "Способ оплаты",
-            "Оплата",
-          ]),
-          fallbackMethod,
-        );
-        const baseSalary = parseMoneyValue(
-          columnValue(row, [
-            "Негізгі айлық",
-            "Айлық",
-            "Сумма",
-            "Общий зп",
-            "Жалпы айлық",
-            "ЗП",
-            "Зарплата",
-            ...selectedMonthHeaders,
-          ]),
-        );
-        const ps = parseMoneyValue(columnValue(row, ["ПС"]));
-        const isPaid = parsePaidValue(
-          columnValue(row, ["Төленді", "Төленген", "Оплачено"]),
-        );
+        const parsed = extractPayrollImportRow(row, {
+          fallbackDepartment: currentDepartment?.name ?? "",
+          fallbackPaymentMethod: fallbackMethod,
+          selectedMonth: data.selectedMonth.month,
+        });
+        const department = currentDepartment?.name ?? parsed.department;
+        const {
+          fullName,
+          position,
+          paymentMethod,
+          baseSalary,
+          components,
+          isPaid,
+        } = parsed;
         const key = `${department.toLocaleLowerCase("kk-KZ")}:${fullName.toLocaleLowerCase("kk-KZ")}`;
         let rowError = "";
         if (!department || !fullName || !paymentMethod) rowError = "Міндетті бағандар бос.";
         else if (!knownDepartments.has(department.toLocaleLowerCase("kk-KZ"))) rowError = "Белгісіз бөлім.";
         else if (!knownMethods.has(paymentMethod.toLocaleLowerCase("kk-KZ"))) rowError = "Белгісіз төлем түрі.";
-        else if (!Number.isFinite(baseSalary) || baseSalary < 0 || !Number.isFinite(ps) || ps < 0) rowError = "Сома дұрыс емес.";
+        else if (
+          !Number.isFinite(baseSalary) ||
+          baseSalary < 0 ||
+          components.some(
+            (component) =>
+              !Number.isFinite(component.amount) || component.amount <= 0,
+          ) ||
+          salaryTotal(
+            baseSalary,
+            components.map((component, index) => ({
+              ...component,
+              id: `import-${index}`,
+            })),
+          ) < 0
+        ) rowError = "Сома дұрыс емес.";
         else if (existing.has(key)) rowError = "Бұл қызметкер осы айда бар.";
         else if (seen.has(key)) rowError = "Файлда қайталанған жол.";
         seen.add(key);
@@ -735,7 +833,7 @@ export function PayrollApp() {
           position,
           paymentMethod,
           baseSalary,
-          ps,
+          components,
           isPaid,
           error: rowError || undefined,
         };
@@ -769,6 +867,15 @@ export function PayrollApp() {
   const currentMonthIndex = data.months.findIndex((item) => item.id === month);
   const canOpenOlderMonth = currentMonthIndex < data.months.length - 1;
   const canOpenNewerMonth = currentMonthIndex > 0;
+  const monthsByYear = data.months.reduce<
+    Array<{ year: string; months: typeof data.months }>
+  >((groups, item) => {
+    const year = item.id.slice(0, 4);
+    const group = groups.find((entry) => entry.year === year);
+    if (group) group.months.push(item);
+    else groups.push({ year, months: [item] });
+    return groups;
+  }, []);
   const recurringExpenses = data.expenses.filter((expense) => expense.isRecurring);
   const oneTimeExpenses = data.expenses.filter(isOneTimeOtherExpense);
   const operationalExpenses = data.expenses.filter(
@@ -790,10 +897,16 @@ export function PayrollApp() {
     (sum, expense) => sum + expense.amount,
     0,
   );
-  const paidOneTimeExpenseTotal = oneTimeExpenses.reduce(
-    (sum, expense) => sum + (expense.isPaid ? expense.amount : 0),
+  const activeDepartments = data.departments.filter(
+    (department) => !department.archivedAt,
+  );
+  const settingsEmployeeCount = activeDepartments.reduce(
+    (total, department) => total + department.employees.length,
     0,
   );
+  const activePaymentMethodCount = data.paymentMethods.filter(
+    (method) => !method.archivedAt,
+  ).length;
 
   return (
     <div className="app-shell">
@@ -803,19 +916,19 @@ export function PayrollApp() {
           <div><strong>Айлық</strong><span>Қаржылық дашборд</span></div>
         </div>
         <nav aria-label="Негізгі бөлімдер">
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
+          <button className={view === "dashboard" ? "active" : ""} onClick={() => changeView("dashboard")}>
             <LayoutDashboard size={19} /><span>Дашборд</span>
           </button>
-          <button className={view === "departments" ? "active" : ""} onClick={() => setView("departments")}>
+          <button className={view === "departments" ? "active" : ""} onClick={() => changeView("departments")}>
             <UsersRound size={19} /><span>Бөлімдер</span>
           </button>
-          <button className={view === "expenses" ? "active" : ""} onClick={() => setView("expenses")}>
+          <button className={view === "expenses" ? "active" : ""} onClick={() => changeView("expenses")}>
             <ReceiptText size={19} /><span>Шығындар</span>
           </button>
-          <button className={view === "other-expenses" ? "active" : ""} onClick={() => setView("other-expenses")}>
+          <button className={view === "other-expenses" ? "active" : ""} onClick={() => changeView("other-expenses")}>
             <ShoppingBag size={19} /><span>Басқа шығындар</span>
           </button>
-          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
+          <button className={view === "settings" ? "active" : ""} onClick={() => changeView("settings")}>
             <Settings size={19} /><span>Баптаулар</span>
           </button>
         </nav>
@@ -850,23 +963,77 @@ export function PayrollApp() {
               >
                 <ChevronLeft size={17} />
               </button>
-              <label className="month-select">
-                <span className="period-icon"><CalendarDays size={18} /></span>
-                <span className="period-copy">
-                  <small>Есептік кезең</small>
-                  <select
-                    aria-label="Есептік ай"
-                    value={month}
-                    onChange={(event) => {
-                      setMonth(event.target.value);
-                      void load(event.target.value);
-                    }}
+              <div className="month-picker" ref={monthPicker}>
+                <button
+                  className={`month-select ${monthMenuOpen ? "open" : ""}`}
+                  type="button"
+                  aria-label="Есептік ай"
+                  aria-expanded={monthMenuOpen}
+                  aria-haspopup="listbox"
+                  aria-controls="month-options"
+                  onClick={() => setMonthMenuOpen((current) => !current)}
+                >
+                  <span className="period-icon"><CalendarDays size={18} /></span>
+                  <span className="period-copy">
+                    <small>Есептік кезең</small>
+                    <b>{data.selectedMonth.label}</b>
+                  </span>
+                  <ChevronDown className="period-chevron" size={16} />
+                </button>
+                {monthMenuOpen && (
+                  <div
+                    className="month-menu"
+                    id="month-options"
+                    role="listbox"
+                    aria-label="Есептік айды таңдаңыз"
                   >
-                    {data.months.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                  </select>
-                </span>
-                <ChevronDown className="period-chevron" size={16} />
-              </label>
+                    <div className="month-menu-head">
+                      <span className="month-menu-icon"><CalendarDays size={18} /></span>
+                      <span>
+                        <b>Есептік айды таңдаңыз</b>
+                        <small>{data.months.length} кезең қолжетімді</small>
+                      </span>
+                    </div>
+                    <div className="month-menu-list">
+                      {monthsByYear.map((group) => (
+                        <div className="month-year-group" key={group.year}>
+                          <span className="month-year-label">{group.year} жыл</span>
+                          {group.months.map((item) => {
+                            const selected = item.id === month;
+                            const monthName = item.label.replace(
+                              /^\d{4}\s*ж\.\s*/,
+                              "",
+                            );
+                            return (
+                              <button
+                                className={`month-option ${selected ? "selected" : ""}`}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                key={item.id}
+                                onClick={() => selectMonth(item.id)}
+                              >
+                                <span className="month-option-calendar">
+                                  {item.id.slice(5)}
+                                </span>
+                                <span className="month-option-copy">
+                                  <b>{monthName}</b>
+                                  <small>{item.label}</small>
+                                </span>
+                                {selected && (
+                                  <span className="month-option-check">
+                                    <Check size={15} strokeWidth={3} />
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 className="period-arrow"
                 type="button"
@@ -894,6 +1061,25 @@ export function PayrollApp() {
 
         {view === "dashboard" && (
           <div className="page-content dashboard-view">
+            <section className="dashboard-expense-quick">
+              <span className="quick-expense-icon"><ShoppingBag size={22} /></span>
+              <div className="quick-expense-copy">
+                <span className="eyebrow">Жұмсалған ақша</span>
+                <h2>Жаңа шығынды бірден тіркеңіз</h2>
+              </div>
+              <div className="quick-expense-total">
+                <small>Осы айда жұмсалды</small>
+                <strong>{formatMoney(oneTimeExpenseTotal)}</strong>
+                <span>{oneTimeExpenses.length} жазба</span>
+              </div>
+              <button className="primary-button" onClick={() => openOneTimeExpense()}>
+                <Plus size={17} /> Жаңа шығын
+              </button>
+              <button className="text-button" onClick={() => changeView("other-expenses")}>
+                Реестрді ашу
+              </button>
+            </section>
+
             <section className="kpi-grid">
               <KpiCard
                 label="Жалпы жоспар"
@@ -918,34 +1104,6 @@ export function PayrollApp() {
                 change={changePercent(data.stats.remainingTotal, previous?.remainingTotal)}
                 tone="warning"
               />
-              <KpiCard
-                label="Барлық шығын"
-                value={data.stats.expenseTotal}
-                icon={<ReceiptText size={21} />}
-                detail={`${data.expenses.length} шығын жазбасы`}
-                change={changePercent(data.stats.expenseTotal, previous?.expenseTotal)}
-                tone="plain"
-              />
-            </section>
-
-            <section className="dashboard-expense-quick">
-              <span className="quick-expense-icon"><ShoppingBag size={22} /></span>
-              <div className="quick-expense-copy">
-                <span className="eyebrow">Бір реттік төлем</span>
-                <h2>Жаңа шығынды бірден тіркеңіз</h2>
-                <p>Парта, орындық немесе басқа сатып алу келесі айға қайталанбайды.</p>
-              </div>
-              <div className="quick-expense-total">
-                <small>Осы айда</small>
-                <strong>{formatMoney(oneTimeExpenseTotal)}</strong>
-                <span>{oneTimeExpenses.length} жазба</span>
-              </div>
-              <button className="primary-button" onClick={() => openOneTimeExpense()}>
-                <Plus size={17} /> Жаңа шығын
-              </button>
-              <button className="text-button" onClick={() => setView("other-expenses")}>
-                Реестрді ашу
-              </button>
             </section>
 
             <section className="dashboard-grid">
@@ -970,7 +1128,7 @@ export function PayrollApp() {
               <article className="panel">
                 <div className="panel-heading">
                   <div><span className="eyebrow">Бөлімдер</span><h2>Айлық қорының бөлінуі</h2></div>
-                  <button className="text-button" onClick={() => setView("departments")}>Толық көру</button>
+                  <button className="text-button" onClick={() => changeView("departments")}>Толық көру</button>
                 </div>
                 <BreakdownBars items={data.departmentBreakdown} emptyText="Қызметкерлер қосылғанда бөлімдер статистикасы шығады." />
               </article>
@@ -980,7 +1138,7 @@ export function PayrollApp() {
               <article className="panel">
                 <div className="panel-heading">
                   <div><span className="eyebrow">Шығындар</span><h2>Категориялар бойынша</h2></div>
-                  <button className="text-button" onClick={() => setView("expenses")}>Шығын қосу</button>
+                  <button className="text-button" onClick={() => changeView("expenses")}>Шығын қосу</button>
                 </div>
                 <BreakdownBars items={data.expenseBreakdown} emptyText="Шығындар қосылғанда категориялар статистикасы шығады." />
               </article>
@@ -1020,7 +1178,11 @@ export function PayrollApp() {
                 <button
                   key={department.id}
                   className={selectedDepartment === department.id ? "active" : ""}
-                  onClick={() => setSelectedDepartment(department.id)}
+                  onClick={() => {
+                    setSelectedDepartment(department.id);
+                    setEmployeeSelectionMode(false);
+                    setSelectedSalaryIds(new Set());
+                  }}
                 >
                   {department.name}<span>{department.employees.length}</span>
                 </button>
@@ -1042,55 +1204,141 @@ export function PayrollApp() {
                     </div>
                     <div className="toolbar-actions">
                       <label className="search-box"><Search size={17} /><input placeholder="Аты немесе төлем түрі" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-                      <button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} /> Импорт</button>
-                      <input ref={importInput} hidden type="file" accept=".xlsx,.csv" onChange={(event) => void readImport(event)} />
-                      <button className="primary-button" onClick={newEmployee}><Plus size={17} /> Қызметкер қосу</button>
                     </div>
                   </div>
                   {filteredEmployees.length ? (
-                    <div className="data-table employee-table">
-                      <div className="table-head"><span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Жалпы сома</span><span>Төленді</span><span /></div>
-                      {filteredEmployees.map((employee) => (
-                        <div className="table-row" key={employee.id}>
-                          <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b>{employee.position && <small>{employee.position}</small>}</span></span>
-                          <span><span className="method-chip">{employee.paymentMethodName}</span></span>
-                          <span className="money-cell">{formatMoney(employee.baseSalary)}</span>
-                          <span className="component-cell">
-                            {employee.components.length ? employee.components.map((component) => <small className={component.kind} key={component.id}>{component.kind === "deduction" ? "−" : "+"}{component.name}: {formatMoney(component.amount)}</small>) : <small>—</small>}
-                          </span>
-                          <strong className="money-cell total-cell">{formatMoney(employee.total)}</strong>
-                          <span>
-                            <button
-                              className={`paid-toggle ${employee.isPaid ? "checked" : ""}`}
-                              onClick={() => void mutate("toggleSalaryPaid", { id: employee.id, isPaid: !employee.isPaid })}
-                              aria-label={employee.isPaid ? "Төленді белгісін алу" : "Төленді деп белгілеу"}
-                              disabled={saving}
-                            >
-                              <i>{employee.isPaid && <Check size={14} />}</i>{employee.isPaid ? "Иә" : "Жоқ"}
-                            </button>
-                          </span>
-                          <span className="row-actions">
-                            <button onClick={() => editEmployee(employee)} aria-label="Өзгерту"><Pencil size={16} /></button>
-                            <button
-                              className="danger"
-                              onClick={() =>
-                                window.confirm(
-                                  `${employee.employeeName} және оның барлық айлардағы айлық есептері толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
-                                ) &&
-                                void mutate("deleteEmployee", {
-                                  employeeId: employee.employeeId,
-                                })
-                              }
-                              aria-label="Қызметкерді толық өшіру"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </span>
+                    <>
+                      <div className={`employee-bulk-bar ${employeeSelectionMode ? "active" : ""}`}>
+                        {!employeeSelectionMode ? (
+                          <button
+                            className="selection-start"
+                            type="button"
+                            onClick={toggleAllEmployees}
+                          >
+                            <CheckCircle2 size={16} />
+                            Барлығын таңдау
+                          </button>
+                        ) : (
+                          <>
+                            <div className="selection-controls">
+                              <label className="bulk-select">
+                                <input
+                                  type="checkbox"
+                                  checked={allEmployeesSelected}
+                                  onChange={toggleAllEmployees}
+                                />
+                                <span>
+                                  {allEmployeesSelected
+                                    ? "Барлығы таңдалды"
+                                    : "Барлығын таңдау"}
+                                </span>
+                              </label>
+                              <button
+                                className="selection-close"
+                                type="button"
+                                onClick={closeEmployeeSelection}
+                              >
+                                <X size={14} /> Аяқтау
+                              </button>
+                            </div>
+                            <div className="bulk-actions">
+                              <strong>
+                                {selectedEmployees.length
+                                  ? `${selectedEmployees.length} қызметкер таңдалды`
+                                  : "Қажетті қызметкерлерді белгілеңіз"}
+                              </strong>
+                              {selectedEmployees.length > 0 && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => void setSelectedEmployeesPaid(true)}
+                                    disabled={saving}
+                                  >
+                                    <CheckCircle2 size={15} /> Төленді
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void setSelectedEmployeesPaid(false)}
+                                    disabled={saving}
+                                  >
+                                    <Clock3 size={15} /> Төленбеді
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="danger"
+                                    onClick={() => void deleteSelectedEmployees()}
+                                    disabled={saving}
+                                  >
+                                    <Trash2 size={15} /> Өшіру
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div className={`data-table employee-table ${employeeSelectionMode ? "selection-mode" : ""}`}>
+                        <div className="table-head">
+                          {employeeSelectionMode && <span />}
+                          <span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Жалпы сома</span><span>Төленді</span><span />
                         </div>
-                      ))}
-                    </div>
+                        {filteredEmployees.map((employee) => (
+                          <div className={`table-row ${selectedSalaryIds.has(employee.id) ? "selected-row" : ""}`} key={employee.id}>
+                            {employeeSelectionMode && (
+                              <label className="employee-select">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${employee.employeeName} таңдау`}
+                                  checked={selectedSalaryIds.has(employee.id)}
+                                  onChange={() => toggleEmployeeSelection(employee.id)}
+                                />
+                              </label>
+                            )}
+                            <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b>{employee.position && <small>{employee.position}</small>}</span></span>
+                            <span><span className="method-chip">{employee.paymentMethodName}</span></span>
+                            <span className="money-cell">{formatMoney(employee.baseSalary)}</span>
+                            <span className="component-cell">
+                              {employee.components.length ? employee.components.map((component) => <small className={component.kind} key={component.id}>{component.kind === "deduction" ? "−" : "+"}{component.name}: {formatMoney(component.amount)}</small>) : <small>—</small>}
+                            </span>
+                            <strong className="money-cell total-cell">{formatMoney(employee.total)}</strong>
+                            <span>
+                              <button
+                                className={`paid-toggle ${employee.isPaid ? "checked" : ""}`}
+                                onClick={() => void mutate("toggleSalaryPaid", { id: employee.id, isPaid: !employee.isPaid })}
+                                aria-label={employee.isPaid ? "Төленді белгісін алу" : "Төленді деп белгілеу"}
+                                disabled={saving}
+                              >
+                                <i>{employee.isPaid && <Check size={14} />}</i>{employee.isPaid ? "Иә" : "Жоқ"}
+                              </button>
+                            </span>
+                            <span className="row-actions">
+                              <button onClick={() => editEmployee(employee)} aria-label="Өзгерту"><Pencil size={16} /></button>
+                              <button
+                                className="danger"
+                                onClick={() =>
+                                  window.confirm(
+                                    `${employee.employeeName} және оның барлық айлардағы айлық есептері толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
+                                  ) &&
+                                  void mutate("deleteEmployee", {
+                                    employeeId: employee.employeeId,
+                                  })
+                                }
+                                aria-label="Қызметкерді толық өшіру"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   ) : (
-                    <EmptyState icon={<UsersRound size={25} />} title="Қызметкерлер жоқ" text="Осы бөлімге бірінші қызметкерді қосыңыз немесе Excel файлын импорттаңыз." action={<button className="primary-button" onClick={newEmployee}><Plus size={17} /> Қызметкер қосу</button>} />
+                    <EmptyState
+                      icon={<UsersRound size={25} />}
+                      title="Қызметкерлер жоқ"
+                      text="Қызметкерлерді Баптаулар бөлімінен қосыңыз немесе Excel файлын импорттаңыз."
+                      action={<button className="primary-button" onClick={openEmployeeSettings}><Settings size={17} /> Баптауларды ашу</button>}
+                    />
                   )}
                 </section>
               </>
@@ -1104,15 +1352,14 @@ export function PayrollApp() {
               <div className="other-expense-heading">
                 <span className="quick-expense-icon"><ShoppingBag size={22} /></span>
                 <div>
-                  <span className="eyebrow">Бір реттік шығындар</span>
+                  <span className="eyebrow">Жұмсалған ақша</span>
                   <h2>{data.selectedMonth.label} реестрі</h2>
-                  <p>Бұл жазбалар тек таңдалған айға есептеледі және келесі айға көшірілмейді.</p>
+                  <p>Бұл жерге ақшасы осы айда жұмсалып қойған шығындар тіркеледі. Олар келесі айға көшірілмейді.</p>
                 </div>
               </div>
               <div className="other-expense-metrics">
-                <div><small>Жалпы сома</small><strong>{formatMoney(oneTimeExpenseTotal)}</strong></div>
-                <div><small>Төленген</small><strong className="success-text">{formatMoney(paidOneTimeExpenseTotal)}</strong></div>
-                <div><small>Қалғаны</small><strong className="primary-text">{formatMoney(oneTimeExpenseTotal - paidOneTimeExpenseTotal)}</strong></div>
+                <div><small>Осы айда жұмсалды</small><strong className="success-text">{formatMoney(oneTimeExpenseTotal)}</strong></div>
+                <div><small>Реестрдегі жазба</small><strong>{oneTimeExpenses.length}</strong></div>
               </div>
               <button className="primary-button" onClick={() => openOneTimeExpense()}>
                 <Plus size={17} /> Жаңа шығын қосу
@@ -1125,23 +1372,14 @@ export function PayrollApp() {
               </div>
               {oneTimeExpenses.length ? (
                 <div className="data-table other-expense-table">
-                  <div className="table-head"><span>Шығын атауы</span><span>Сома</span><span>Төленді</span><span /></div>
+                  <div className="table-head"><span>Шығын атауы</span><span>Жұмсалған сома</span><span /></div>
                   {oneTimeExpenses.map((expense) => (
                     <div className="table-row" key={expense.id}>
                       <span className="expense-name">
                         <i><ShoppingBag size={17} /></i>
-                        <span><b>{expense.name}</b><small>Басқа шығындар · бір рет</small></span>
+                        <span><b>{expense.name}</b><small>Басқа шығындар · осы айда жұмсалды</small></span>
                       </span>
                       <strong className="money-cell total-cell">{formatMoney(expense.amount)}</strong>
-                      <span>
-                        <button
-                          className={`paid-toggle ${expense.isPaid ? "checked" : ""}`}
-                          onClick={() => void mutate("toggleExpensePaid", { id: expense.id, isPaid: !expense.isPaid })}
-                          disabled={saving}
-                        >
-                          <i>{expense.isPaid && <Check size={14} />}</i>{expense.isPaid ? "Иә" : "Жоқ"}
-                        </button>
-                      </span>
                       <span className="row-actions">
                         <button onClick={() => openOneTimeExpense(expense)} aria-label="Басқа шығынды өзгерту"><Pencil size={16} /></button>
                         <button
@@ -1180,26 +1418,110 @@ export function PayrollApp() {
                 <span className="count-chip">{operationalExpenses.length} жазба</span>
               </div>
               {operationalExpenses.length ? (
-                <div className="data-table expense-table">
-                  <div className="table-head"><span>Шығын</span><span>Категория</span><span>Қайталанады</span><span>Сома</span><span>Төленді</span><span /></div>
-                  {operationalExpenses.map((expense) => (
-                    <div className="table-row" key={expense.id}>
-                      <span className="expense-name"><i><ReceiptText size={17} /></i><b>{expense.name}</b></span>
-                      <span><span className="method-chip">{expense.categoryName}</span></span>
-                      <span>{expense.isRecurring ? "Әр ай сайын" : "Бір рет"}</span>
-                      <strong className="money-cell total-cell">{formatMoney(expense.amount)}</strong>
-                      <span>
-                        <button className={`paid-toggle ${expense.isPaid ? "checked" : ""}`} onClick={() => void mutate("toggleExpensePaid", { id: expense.id, isPaid: !expense.isPaid })} disabled={saving}>
-                          <i>{expense.isPaid && <Check size={14} />}</i>{expense.isPaid ? "Иә" : "Жоқ"}
-                        </button>
-                      </span>
-                      <span className="row-actions">
-                        <button onClick={() => setExpenseDraft({ id: expense.id, name: expense.name, categoryId: expense.categoryId, amount: expense.amount, isRecurring: expense.isRecurring })} aria-label="Өзгерту"><Pencil size={16} /></button>
-                        <button onClick={() => window.confirm(`${expense.name} өшірілсін бе?`) && void mutate("deleteExpense", { id: expense.id })} aria-label="Өшіру"><Trash2 size={16} /></button>
-                      </span>
+                <>
+                  <div className={`employee-bulk-bar ${expenseSelectionMode ? "active" : ""}`}>
+                    {!expenseSelectionMode ? (
+                      <button
+                        className="selection-start"
+                        type="button"
+                        onClick={toggleAllExpenses}
+                      >
+                        <CheckCircle2 size={16} />
+                        Барлығын таңдау
+                      </button>
+                    ) : (
+                      <>
+                        <div className="selection-controls">
+                          <label className="bulk-select">
+                            <input
+                              type="checkbox"
+                              checked={allExpensesSelected}
+                              onChange={toggleAllExpenses}
+                            />
+                            <span>
+                              {allExpensesSelected
+                                ? "Барлығы таңдалды"
+                                : "Барлығын таңдау"}
+                            </span>
+                          </label>
+                          <button
+                            className="selection-close"
+                            type="button"
+                            onClick={closeExpenseSelection}
+                          >
+                            <X size={14} /> Аяқтау
+                          </button>
+                        </div>
+                        <div className="bulk-actions">
+                          <strong>
+                            {selectedExpenses.length
+                              ? `${selectedExpenses.length} шығын таңдалды`
+                              : "Қажетті шығындарды белгілеңіз"}
+                          </strong>
+                          {selectedExpenses.length > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void setSelectedExpensesPaid(true)}
+                                disabled={saving}
+                              >
+                                <CheckCircle2 size={15} /> Төленді
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void setSelectedExpensesPaid(false)}
+                                disabled={saving}
+                              >
+                                <Clock3 size={15} /> Төленбеді
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => void deleteSelectedExpenses()}
+                                disabled={saving}
+                              >
+                                <Trash2 size={15} /> Өшіру
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className={`data-table expense-table ${expenseSelectionMode ? "selection-mode" : ""}`}>
+                    <div className="table-head">
+                      {expenseSelectionMode && <span />}
+                      <span>Шығын</span><span>Категория</span><span>Қайталанады</span><span>Сома</span><span>Төленді</span><span />
                     </div>
-                  ))}
-                </div>
+                    {operationalExpenses.map((expense) => (
+                      <div className={`table-row ${selectedExpenseIds.has(expense.id) ? "selected-row" : ""}`} key={expense.id}>
+                        {expenseSelectionMode && (
+                          <label className="employee-select">
+                            <input
+                              type="checkbox"
+                              aria-label={`${expense.name} таңдау`}
+                              checked={selectedExpenseIds.has(expense.id)}
+                              onChange={() => toggleExpenseSelection(expense.id)}
+                            />
+                          </label>
+                        )}
+                        <span className="expense-name"><i><ReceiptText size={17} /></i><b>{expense.name}</b></span>
+                        <span><span className="method-chip">{expense.categoryName}</span></span>
+                        <span>{expense.isRecurring ? "Әр ай сайын" : "Бір рет"}</span>
+                        <strong className="money-cell total-cell">{formatMoney(expense.amount)}</strong>
+                        <span>
+                          <button className={`paid-toggle ${expense.isPaid ? "checked" : ""}`} onClick={() => void mutate("toggleExpensePaid", { id: expense.id, isPaid: !expense.isPaid })} disabled={saving}>
+                            <i>{expense.isPaid && <Check size={14} />}</i>{expense.isPaid ? "Иә" : "Жоқ"}
+                          </button>
+                        </span>
+                        <span className="row-actions">
+                          <button onClick={() => setExpenseDraft({ id: expense.id, name: expense.name, categoryId: expense.categoryId, amount: expense.amount, isRecurring: expense.isRecurring })} aria-label="Өзгерту"><Pencil size={16} /></button>
+                          <button onClick={() => window.confirm(`${expense.name} өшірілсін бе?`) && void mutate("deleteExpense", { id: expense.id })} aria-label="Өшіру"><Trash2 size={16} /></button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <EmptyState icon={<ReceiptText size={25} />} title="Шығындар жоқ" text="Аренда, интернет немесе басқа операциялық шығынды қосыңыз." action={<button className="primary-button" onClick={() => setExpenseDraft({ name: "", categoryId: data.expenseCategories.find((category) => !category.archivedAt)?.id ?? "", amount: 0, isRecurring: true })}><Plus size={17} /> Шығын қосу</button>} />
               )}
@@ -1208,49 +1530,201 @@ export function PayrollApp() {
         )}
 
         {view === "settings" && (
-          <div className="page-content settings-grid">
-            <section className="panel settings-panel">
-              <div className="panel-heading"><div><span className="eyebrow">Құрылым</span><h2>Бөлімдер</h2></div><button className="small-add" onClick={() => setEntityDraft({ type: "department", name: "" })}><Plus size={16} /> Қосу</button></div>
-              <div className="settings-list">
-                {data.departments.map((department) => (
-                  <div key={department.id}><span><i><Building2 size={17} /></i><b>{department.name}</b>{department.archivedAt && <em>Архив</em>}</span><span className="settings-actions"><button onClick={() => setEntityDraft({ type: "department", id: department.id, name: department.name })}><Pencil size={15} /></button>{!department.archivedAt && <button onClick={() => window.confirm(`${department.name} архивтелсін бе?`) && void mutate("archiveDepartment", { id: department.id })}><Archive size={15} /></button>}</span></div>
-                ))}
+          <div className="page-content settings-page">
+            <section className="settings-overview">
+              <span className="settings-overview-icon"><Settings size={24} /></span>
+              <div className="settings-overview-copy">
+                <span className="eyebrow">Басқару орталығы</span>
+                <h2>Барлық баптау бір жерде</h2>
+                <p>Қызметкерлерді, бөлімдерді және қаржылық анықтамалықтарды осы жерден басқарыңыз.</p>
+              </div>
+              <div className="settings-overview-metrics">
+                <div><small>Қызметкерлер</small><strong>{settingsEmployeeCount}</strong></div>
+                <div><small>Белсенді бөлім</small><strong>{activeDepartments.length}</strong></div>
+                <div><small>Төлем түрі</small><strong>{activePaymentMethodCount}</strong></div>
               </div>
             </section>
-            <section className="panel settings-panel">
-              <div className="panel-heading"><div><span className="eyebrow">Анықтамалық</span><h2>Төлем түрлері</h2></div><button className="small-add" onClick={() => setEntityDraft({ type: "method", name: "" })}><Plus size={16} /> Қосу</button></div>
-              <div className="settings-list">
-                {data.paymentMethods.map((method) => (
-                  <div key={method.id}><span><i><WalletCards size={17} /></i><b>{method.name}</b>{method.isSystem && <em>Дайын</em>}{method.archivedAt && <em>Архив</em>}</span><span className="settings-actions"><button onClick={() => setEntityDraft({ type: "method", id: method.id, name: method.name })}><Pencil size={15} /></button>{!method.archivedAt && <button onClick={() => window.confirm(`${method.name} архивтелсін бе?`) && void mutate("archivePaymentMethod", { id: method.id })}><Archive size={15} /></button>}</span></div>
-                ))}
-              </div>
-            </section>
-            <section className="panel settings-panel">
-              <div className="panel-heading"><div><span className="eyebrow">Шығындар</span><h2>Категориялар</h2></div><button className="small-add" onClick={() => setEntityDraft({ type: "category", name: "" })}><Plus size={16} /> Қосу</button></div>
-              <div className="settings-list">
-                {data.expenseCategories.map((category) => (
-                  <div key={category.id}>
-                    <span>
-                      <i><ReceiptText size={17} /></i>
-                      <b>{category.name}</b>
-                      {category.id === OTHER_EXPENSE_CATEGORY_ID && <em>Жүйелік</em>}
-                      {category.archivedAt && <em>Архив</em>}
+
+            <nav className="settings-tabs" aria-label="Баптаулар бөлімдері">
+              <button className={settingsSection === "employees" ? "active" : ""} onClick={() => setSettingsSection("employees")}>
+                <UsersRound size={17} /><span><b>Қызметкерлер</b><small>Қосу және импорт</small></span>
+              </button>
+              <button className={settingsSection === "departments" ? "active" : ""} onClick={() => setSettingsSection("departments")}>
+                <Building2 size={17} /><span><b>Бөлімдер</b><small>Құрылымды басқару</small></span>
+              </button>
+              <button className={settingsSection === "methods" ? "active" : ""} onClick={() => setSettingsSection("methods")}>
+                <WalletCards size={17} /><span><b>Төлем түрлері</b><small>Анықтамалық</small></span>
+              </button>
+              <button className={settingsSection === "categories" ? "active" : ""} onClick={() => setSettingsSection("categories")}>
+                <ReceiptText size={17} /><span><b>Шығын категориялары</b><small>Жіктеу</small></span>
+              </button>
+              <button className={settingsSection === "security" ? "active" : ""} onClick={() => setSettingsSection("security")}>
+                <CheckCircle2 size={17} /><span><b>Қауіпсіздік</b><small>Ортақ пароль</small></span>
+              </button>
+            </nav>
+
+            {settingsSection === "employees" && (
+              <section className="panel settings-workspace employee-management">
+                <div className="settings-workspace-heading">
+                  <div>
+                    <span className="eyebrow">Команданы басқару</span>
+                    <h2>Қызметкерлер</h2>
+                    <p>Таңдалған айдағы қызметкерлерді қосыңыз, импорттаңыз немесе өзгертіңіз.</p>
+                  </div>
+                  <div className="employee-management-actions">
+                    <label className="search-box"><Search size={17} /><input placeholder="Аты немесе төлем түрі" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+                    <button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} /> Excel импорт</button>
+                    <input ref={importInput} hidden type="file" accept=".xlsx,.csv" onChange={(event) => void readImport(event)} />
+                    <button className="primary-button" onClick={newEmployee}><Plus size={17} /> Қызметкер қосу</button>
+                  </div>
+                </div>
+
+                <div className="employee-management-filter">
+                  <label className="settings-department-picker">
+                    <span>Қызметкер қосылатын бөлім</span>
+                    <span className="settings-select-control">
+                      <Building2 size={16} />
+                      <select
+                        aria-label="Қызметкерлер бөлімі"
+                        value={selectedDepartment}
+                        onChange={(event) => {
+                          setSelectedDepartment(event.target.value);
+                          setSearch("");
+                        }}
+                      >
+                        {activeDepartments.map((department) => (
+                          <option key={department.id} value={department.id}>
+                            {department.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={15} />
                     </span>
-                    {category.id !== OTHER_EXPENSE_CATEGORY_ID && (
-                      <span className="settings-actions">
-                        <button onClick={() => setEntityDraft({ type: "category", id: category.id, name: category.name })}><Pencil size={15} /></button>
-                        {!category.archivedAt && <button onClick={() => window.confirm(`${category.name} архивтелсін бе?`) && void mutate("archiveExpenseCategory", { id: category.id })}><Archive size={15} /></button>}
+                  </label>
+                  <div className="employee-management-stat">
+                    <span><UsersRound size={16} /> Қызметкерлер</span>
+                    <strong>{currentDepartment?.employees.length ?? 0}</strong>
+                  </div>
+                  <div className="employee-management-stat amount">
+                    <span><WalletCards size={16} /> Айлық қоры</span>
+                    <strong>{formatMoney(currentDepartment?.total ?? 0)}</strong>
+                  </div>
+                </div>
+
+                {currentDepartment?.employees.length ? (
+                  <div className="data-table settings-employee-table">
+                    <div className="table-head"><span>Қызметкер</span><span>Лауазым</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Жалпы сома</span><span /></div>
+                    {filteredEmployees.map((employee) => (
+                      <div className="table-row" key={employee.id}>
+                        <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b><small>{currentDepartment.name}</small></span></span>
+                        <span>{employee.position || "Көрсетілмеген"}</span>
+                        <span><span className="method-chip">{employee.paymentMethodName}</span></span>
+                        <span className="money-cell">{formatMoney(employee.baseSalary)}</span>
+                        <strong className="money-cell total-cell">{formatMoney(employee.total)}</strong>
+                        <span className="row-actions">
+                          <button onClick={() => editEmployee(employee)} aria-label={`${employee.employeeName} өзгерту`}><Pencil size={16} /></button>
+                          <button
+                            className="danger"
+                            onClick={() =>
+                              window.confirm(
+                                `${employee.employeeName} және оның барлық айлардағы айлық есептері толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
+                              ) &&
+                              void mutate("deleteEmployee", {
+                                employeeId: employee.employeeId,
+                              })
+                            }
+                            aria-label={`${employee.employeeName} толық өшіру`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={<UsersRound size={25} />}
+                    title="Бұл бөлімде қызметкер жоқ"
+                    text="Бір қызметкер қосыңыз немесе дайын Excel/CSV файлын импорттаңыз."
+                    action={(
+                      <span className="empty-actions">
+                        <button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} /> Excel импорт</button>
+                        <button className="primary-button" onClick={newEmployee}><Plus size={17} /> Қызметкер қосу</button>
                       </span>
                     )}
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="panel security-panel">
-              <div className="security-icon"><CheckCircle2 size={24} /></div>
-              <div><span className="eyebrow">Қауіпсіздік</span><h2>Ортақ пароль</h2><p>Пароль өзгертілгенде барлық ашық сессия жабылады.</p></div>
-              <button className="secondary-button" onClick={() => setPasswordOpen(true)}>Парольді өзгерту</button>
-            </section>
+                  />
+                )}
+              </section>
+            )}
+
+            {settingsSection === "departments" && (
+              <section className="panel settings-workspace reference-workspace">
+                <div className="settings-workspace-heading">
+                  <div><span className="eyebrow">Ұйым құрылымы</span><h2>Бөлімдер</h2><p>Бөлім атауларын және қолжетімділігін басқарыңыз.</p></div>
+                  <button className="primary-button" onClick={() => setEntityDraft({ type: "department", name: "" })}><Plus size={16} /> Бөлім қосу</button>
+                </div>
+                <div className="settings-list">
+                  {data.departments.map((department) => (
+                    <div key={department.id}>
+                      <span><i><Building2 size={17} /></i><span><b>{department.name}</b><small>{department.employees.length} қызметкер</small></span>{department.archivedAt && <em>Архив</em>}</span>
+                      <span className="settings-actions"><button onClick={() => setEntityDraft({ type: "department", id: department.id, name: department.name })} aria-label={`${department.name} өзгерту`}><Pencil size={15} /></button>{!department.archivedAt && <button onClick={() => window.confirm(`${department.name} архивтелсін бе?`) && void mutate("archiveDepartment", { id: department.id })} aria-label={`${department.name} архивтеу`}><Archive size={15} /></button>}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {settingsSection === "methods" && (
+              <section className="panel settings-workspace reference-workspace">
+                <div className="settings-workspace-heading">
+                  <div><span className="eyebrow">Айлық анықтамалығы</span><h2>Төлем түрлері</h2><p>Қызметкерлерге қолжетімді төлем форматтарын басқарыңыз.</p></div>
+                  <button className="primary-button" onClick={() => setEntityDraft({ type: "method", name: "" })}><Plus size={16} /> Төлем түрін қосу</button>
+                </div>
+                <div className="settings-list">
+                  {data.paymentMethods.map((method) => (
+                    <div key={method.id}>
+                      <span><i><WalletCards size={17} /></i><span><b>{method.name}</b><small>Қызметкердің төлем форматы</small></span>{method.isSystem && <em>Дайын</em>}{method.archivedAt && <em>Архив</em>}</span>
+                      <span className="settings-actions"><button onClick={() => setEntityDraft({ type: "method", id: method.id, name: method.name })} aria-label={`${method.name} өзгерту`}><Pencil size={15} /></button>{!method.archivedAt && <button onClick={() => window.confirm(`${method.name} архивтелсін бе?`) && void mutate("archivePaymentMethod", { id: method.id })} aria-label={`${method.name} архивтеу`}><Archive size={15} /></button>}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {settingsSection === "categories" && (
+              <section className="panel settings-workspace reference-workspace">
+                <div className="settings-workspace-heading">
+                  <div><span className="eyebrow">Шығын анықтамалығы</span><h2>Шығын категориялары</h2><p>Операциялық шығындарды дұрыс жіктеу үшін категорияларды реттеңіз.</p></div>
+                  <button className="primary-button" onClick={() => setEntityDraft({ type: "category", name: "" })}><Plus size={16} /> Категория қосу</button>
+                </div>
+                <div className="settings-list">
+                  {data.expenseCategories.map((category) => (
+                    <div key={category.id}>
+                      <span>
+                        <i><ReceiptText size={17} /></i>
+                        <span><b>{category.name}</b><small>{category.id === OTHER_EXPENSE_CATEGORY_ID ? "Бір реттік шығындар реестрі" : "Операциялық шығын категориясы"}</small></span>
+                        {category.id === OTHER_EXPENSE_CATEGORY_ID && <em>Жүйелік</em>}
+                        {category.archivedAt && <em>Архив</em>}
+                      </span>
+                      {category.id !== OTHER_EXPENSE_CATEGORY_ID && (
+                        <span className="settings-actions">
+                          <button onClick={() => setEntityDraft({ type: "category", id: category.id, name: category.name })} aria-label={`${category.name} өзгерту`}><Pencil size={15} /></button>
+                          {!category.archivedAt && <button onClick={() => window.confirm(`${category.name} архивтелсін бе?`) && void mutate("archiveExpenseCategory", { id: category.id })} aria-label={`${category.name} архивтеу`}><Archive size={15} /></button>}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {settingsSection === "security" && (
+              <section className="panel security-panel settings-security">
+                <div className="security-icon"><CheckCircle2 size={24} /></div>
+                <div><span className="eyebrow">Қауіпсіздік</span><h2>Ортақ пароль</h2><p>Пароль өзгертілгенде барлық ашық сессия жабылып, қайта кіру қажет болады.</p></div>
+                <button className="primary-button" onClick={() => setPasswordOpen(true)}>Парольді өзгерту</button>
+              </section>
+            )}
           </div>
         )}
       </main>
@@ -1294,8 +1768,8 @@ export function PayrollApp() {
               </div>
             </div>
             <div className="copy-preview">
-              <div><span><UsersRound size={18} /></span><div><small>Қызметкерлер</small><strong>{data.stats.employeeCount}</strong></div></div>
-              <div><span><WalletCards size={18} /></span><div><small>Айлық қоры</small><strong>{formatMoney(data.stats.salaryTotal)}</strong></div></div>
+              <div><span><UsersRound size={18} /></span><div><small>Көшірілетін қызметкерлер</small><strong>{copyableEmployeeCount}</strong><em>Кураторлар мен Сату бөлімі — бос</em></div></div>
+              <div><span><WalletCards size={18} /></span><div><small>Көшірілетін айлық қоры</small><strong>{formatMoney(copyableSalaryTotal)}</strong></div></div>
               <div><span><ReceiptText size={18} /></span><div><small>Тұрақты шығындар</small><strong>{formatMoney(recurringExpenseTotal)}</strong><em>{recurringExpenses.length} жазба</em></div></div>
             </div>
             <label className="check-label copy-option">
@@ -1312,9 +1786,11 @@ export function PayrollApp() {
               <span><b>Қайталанатын шығындарды көшіру</b><small>Аренда, интернет және тұрақты сервистер жаңа айға қосылады</small></span>
             </label>
             <p className="modal-note">
-              Қызметкерлер, негізгі айлық және барлық қосымша/ұсталым көшіріледі.
-              Жаңа ай ашылған соң әр қызметкердің сомасын еркін өзгерте аласыз —
-              өткен ай өзгермейді. «Төленді» белгілері нөлден басталады.
+              Академ, Мұғалімдер, Маркетинг Eduser және Ustaz Media
+              қызметкерлері айлық компоненттерімен бірге көшіріледі.
+              Кураторлар мен Сату бөлімі жаңа айда бос ашылады — олардың жаңа
+              тізімін Excel арқылы импорттайсыз. «Төленді» белгілері нөлден
+              басталады.
             </p>
             <div className="modal-actions">
               <button type="button" className="ghost-button" onClick={() => setMonthDraft(null)}>Болдырмау</button>
@@ -1371,7 +1847,8 @@ export function PayrollApp() {
           <form className="modal-form" onSubmit={(event) => void submitOneTimeExpense(event)}>
             <p className="modal-note">
               Категория автоматты түрде «Басқа шығындар» болады. Бұл бір реттік
-              жазба келесі айға көшірілмейді.
+              жазба сақталған бойда осы айда жұмсалған сомаға қосылады және
+              келесі айға көшірілмейді.
             </p>
             <label>
               <span>Шығын атауы</span>
@@ -1447,13 +1924,26 @@ export function PayrollApp() {
       )}
 
       {importRows && (
-        <Modal title={`${currentDepartment?.name ?? "Бөлім"}: импорт`} subtitle="Excel / CSV алдын ала тексеру" onClose={() => setImportRows(null)} wide>
+        <Modal title={`${currentDepartment?.name ?? "Бөлім"}: импорт`} subtitle="Excel / CSV алдын ала тексеру" onClose={() => setImportRows(null)} extraWide>
           <div className="import-content">
-            <div className="import-summary"><span><FileSpreadsheet size={20} /> {importRows.length} адам</span><span>Айлық қоры: <strong>{formatMoney(importRows.reduce((sum, row) => sum + row.baseSalary + row.ps, 0))}</strong></span><strong className={importRows.some((row) => row.error) ? "has-errors" : ""}>{importRows.filter((row) => row.error).length} қате</strong></div>
+            <p className="import-note">
+              Excel ішінен аты-жөні бар кесте автоматты табылады. Негізгі айлық,
+              жалпы сома және бөлек төлем бағандары теңге ретінде танылады.
+              Табылған қорытындының барлығы қызметкердің негізгі айлығы болып
+              сақталады. Импортқа дейін барлық жолды тексеріңіз.
+            </p>
+            <div className="import-summary"><span><FileSpreadsheet size={20} /> {importRows.length} адам</span><span>Айлық қоры: <strong>{formatMoney(importRows.reduce((sum, row) => sum + importRowTotal(row), 0))}</strong></span><strong className={importRows.some((row) => row.error) ? "has-errors" : ""}>{importRows.filter((row) => row.error).length} қате</strong></div>
             <div className="import-table">
-              <div><b>Қызметкер</b><b>Лауазым</b><b>Айлық</b><b>ПС</b><b>Төлем түрі</b><b>Статус</b></div>
+              <div><b>Қызметкер</b><b>Лауазым</b><b>Негізгі айлық</b><b>Жалпы сома</b><b>Төлем түрі</b><b>Статус</b></div>
               {importRows.slice(0, 100).map((row, index) => (
-                <div key={`${row.fullName}-${index}`} className={row.error ? "error-row" : ""}><span>{row.fullName || "—"}</span><span>{row.position || "—"}</span><span>{formatMoney(row.baseSalary || 0)}</span><span>{formatMoney(row.ps || 0)}</span><span>{row.paymentMethod || "—"}</span><span>{row.error ?? (row.isPaid ? "Төленді" : "Дайын")}</span></div>
+                <div key={`${row.fullName}-${index}`} className={row.error ? "error-row" : ""}>
+                  <strong>{row.fullName || "—"}</strong>
+                  <span>{row.position || "—"}</span>
+                  <span className="import-money">{formatMoney(row.baseSalary || 0)}</span>
+                  <strong className="import-money import-total">{formatMoney(importRowTotal(row))}</strong>
+                  <span>{row.paymentMethod || "—"}</span>
+                  <span>{row.error ?? (row.isPaid ? "Төленді" : "Дайын")}</span>
+                </div>
               ))}
             </div>
             <div className="modal-actions"><button className="ghost-button" onClick={() => setImportRows(null)}>Болдырмау</button><button className="primary-button" disabled={saving || importRows.some((row) => row.error)} onClick={() => void mutate("importEmployees", { rows: importRows, departmentId: selectedDepartment })}>{saving ? "Импортталуда…" : `${importRows.length} қызметкерді импорттау`}</button></div>

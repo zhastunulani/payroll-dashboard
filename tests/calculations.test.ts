@@ -72,6 +72,32 @@ test("paid and remaining totals include salaries and expenses", () => {
   });
 });
 
+test("one-time other expenses are immediately counted as spent", () => {
+  const expenses: ExpenseRecord[] = [
+    {
+      id: "x-one-time",
+      categoryId: "expense-other",
+      categoryName: "Басқа шығындар",
+      name: "Парта",
+      amount: 420_000,
+      isRecurring: false,
+      isPaid: true,
+      paidAt: null,
+    },
+  ];
+
+  assert.deepEqual(computeStats([], expenses), {
+    salaryTotal: 0,
+    expenseTotal: 420_000,
+    plannedTotal: 420_000,
+    paidTotal: 420_000,
+    remainingTotal: 0,
+    paidEmployees: 0,
+    employeeCount: 0,
+    paymentProgress: 100,
+  });
+});
+
 test("breakdown compares current and previous month", () => {
   const result = buildBreakdown(
     [{ id: "d1", name: "Академ", amount: 1_200_000 }],

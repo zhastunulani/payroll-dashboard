@@ -10,6 +10,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   FileSpreadsheet,
   LayoutDashboard,
@@ -19,6 +21,7 @@ import {
   ReceiptText,
   Search,
   Settings,
+  ShoppingBag,
   Trash2,
   Upload,
   UsersRound,
@@ -33,18 +36,45 @@ import type {
   SalaryRecord,
 } from "@/lib/types";
 import { salaryTotal } from "@/lib/calculations";
+import {
+  isOneTimeOtherExpense,
+  OTHER_EXPENSE_CATEGORY_ID,
+} from "@/lib/expenses";
+import { formatMoney, formatMoneyInput, parseMoneyInput } from "@/lib/money";
+import { nextAvailableMonthId } from "@/lib/months";
 
-type View = "dashboard" | "departments" | "expenses" | "settings";
+type View =
+  | "dashboard"
+  | "departments"
+  | "expenses"
+  | "other-expenses"
+  | "settings";
 type EntityType = "department" | "method" | "category";
 
-const CURRENCY = new Intl.NumberFormat("kk-KZ", {
-  style: "currency",
-  currency: "KZT",
-  maximumFractionDigits: 0,
-});
-
-function formatMoney(value: number): string {
-  return CURRENCY.format(value).replace("KZT", "₸");
+function MoneyInput({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="amount-input">
+      <input
+        aria-label={ariaLabel}
+        inputMode="numeric"
+        maxLength={18}
+        placeholder="0"
+        type="text"
+        value={formatMoneyInput(value)}
+        onChange={(event) => onChange(parseMoneyInput(event.target.value))}
+        onFocus={(event) => event.currentTarget.select()}
+      />
+      <b>₸</b>
+    </div>
+  );
 }
 
 function normalizedHeader(value: string): string {
@@ -376,6 +406,17 @@ type ExpenseDraft = {
   isRecurring: boolean;
 };
 
+type MonthDraft = {
+  targetMonthId: string;
+  copyRecurringExpenses: boolean;
+};
+
+type OneTimeExpenseDraft = {
+  id?: string;
+  name: string;
+  amount: number;
+};
+
 type ImportRow = {
   department: string;
   fullName: string;
@@ -398,7 +439,9 @@ export function PayrollApp() {
   const [error, setError] = useState("");
   const [employeeDraft, setEmployeeDraft] = useState<EmployeeDraft | null>(null);
   const [expenseDraft, setExpenseDraft] = useState<ExpenseDraft | null>(null);
-  const [monthDraft, setMonthDraft] = useState("");
+  const [monthDraft, setMonthDraft] = useState<MonthDraft | null>(null);
+  const [oneTimeExpenseDraft, setOneTimeExpenseDraft] =
+    useState<OneTimeExpenseDraft | null>(null);
   const [entityDraft, setEntityDraft] = useState<{
     type: EntityType;
     id?: string;
@@ -443,8 +486,11 @@ export function PayrollApp() {
     return () => window.clearTimeout(initialLoad);
   }, []);
 
-  async function mutate(action: string, payload: Record<string, unknown> = {}) {
-    if (!data) return;
+  async function mutate(
+    action: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<boolean> {
+    if (!data) return false;
     setSaving(true);
     setError("");
     try {
@@ -455,7 +501,7 @@ export function PayrollApp() {
       });
       if (response.status === 401) {
         window.location.reload();
-        return;
+        return false;
       }
       const result = (await response.json()) as PayrollData & {
         error?: string;
@@ -465,7 +511,7 @@ export function PayrollApp() {
       if (result.signedOut) {
         await fetch("/api/auth/logout", { method: "POST" });
         window.location.reload();
-        return;
+        return false;
       }
       setData(result);
       setMonth(result.selectedMonth.id);
@@ -473,9 +519,11 @@ export function PayrollApp() {
       setExpenseDraft(null);
       setEntityDraft(null);
       setImportRows(null);
-      setMonthDraft("");
+      setMonthDraft(null);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Әрекет орындалмады.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -526,6 +574,54 @@ export function PayrollApp() {
       baseSalary: employee.baseSalary,
       components: employee.components.map((component) => ({ ...component })),
     });
+  }
+
+  function openMonthDialog() {
+    if (!data) return;
+    setMonthDraft({
+      targetMonthId: nextAvailableMonthId(
+        data.selectedMonth.id,
+        data.months.map((item) => item.id),
+      ),
+      copyRecurringExpenses: true,
+    });
+  }
+
+  function navigateMonth(direction: "older" | "newer") {
+    if (!data) return;
+    const currentIndex = data.months.findIndex((item) => item.id === month);
+    const nextIndex = direction === "older" ? currentIndex + 1 : currentIndex - 1;
+    const target = data.months[nextIndex];
+    if (!target) return;
+    setMonth(target.id);
+    void load(target.id);
+  }
+
+  async function submitOneTimeExpense(event: FormEvent) {
+    event.preventDefault();
+    if (!data || !oneTimeExpenseDraft) return;
+    if (!oneTimeExpenseDraft.name.trim()) {
+      setError("Шығын атауын жазыңыз.");
+      return;
+    }
+    if (oneTimeExpenseDraft.amount <= 0) {
+      setError("Шығын сомасы 0 ₸-ден жоғары болуы керек.");
+      return;
+    }
+    const saved = await mutate("saveOneTimeExpense", {
+      id: oneTimeExpenseDraft.id,
+      name: oneTimeExpenseDraft.name,
+      amount: oneTimeExpenseDraft.amount,
+    });
+    if (saved) setOneTimeExpenseDraft(null);
+  }
+
+  function openOneTimeExpense(expense?: PayrollData["expenses"][number]) {
+    setOneTimeExpenseDraft(
+      expense
+        ? { id: expense.id, name: expense.name, amount: expense.amount }
+        : { name: "", amount: 0 },
+    );
   }
 
   async function readImport(event: ChangeEvent<HTMLInputElement>) {
@@ -670,6 +766,34 @@ export function PayrollApp() {
   }
 
   const previous = data.previousStats;
+  const currentMonthIndex = data.months.findIndex((item) => item.id === month);
+  const canOpenOlderMonth = currentMonthIndex < data.months.length - 1;
+  const canOpenNewerMonth = currentMonthIndex > 0;
+  const recurringExpenses = data.expenses.filter((expense) => expense.isRecurring);
+  const oneTimeExpenses = data.expenses.filter(isOneTimeOtherExpense);
+  const operationalExpenses = data.expenses.filter(
+    (expense) => !isOneTimeOtherExpense(expense),
+  );
+  const recurringExpenseTotal = recurringExpenses.reduce(
+    (sum, expense) => sum + expense.amount,
+    0,
+  );
+  const operationalExpenseTotal = operationalExpenses.reduce(
+    (sum, expense) => sum + expense.amount,
+    0,
+  );
+  const paidOperationalExpenseTotal = operationalExpenses.reduce(
+    (sum, expense) => sum + (expense.isPaid ? expense.amount : 0),
+    0,
+  );
+  const oneTimeExpenseTotal = oneTimeExpenses.reduce(
+    (sum, expense) => sum + expense.amount,
+    0,
+  );
+  const paidOneTimeExpenseTotal = oneTimeExpenses.reduce(
+    (sum, expense) => sum + (expense.isPaid ? expense.amount : 0),
+    0,
+  );
 
   return (
     <div className="app-shell">
@@ -687,6 +811,9 @@ export function PayrollApp() {
           </button>
           <button className={view === "expenses" ? "active" : ""} onClick={() => setView("expenses")}>
             <ReceiptText size={19} /><span>Шығындар</span>
+          </button>
+          <button className={view === "other-expenses" ? "active" : ""} onClick={() => setView("other-expenses")}>
+            <ShoppingBag size={19} /><span>Басқа шығындар</span>
           </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
             <Settings size={19} /><span>Баптаулар</span>
@@ -706,27 +833,54 @@ export function PayrollApp() {
               {view === "dashboard" && "Қаржылық шолу"}
               {view === "departments" && "Бөлімдердің айлығы"}
               {view === "expenses" && "Операциялық шығындар"}
+              {view === "other-expenses" && "Басқа шығындар"}
               {view === "settings" && "Баптаулар"}
             </h1>
             <p>{data.selectedMonth.label} бойынша есеп</p>
           </div>
-          <div className="topbar-actions">
-            <label className="month-select">
-              <CalendarDays size={17} />
-              <select
-                aria-label="Есептік ай"
-                value={month}
-                onChange={(event) => {
-                  setMonth(event.target.value);
-                  void load(event.target.value);
-                }}
+          <div className="topbar-actions period-actions">
+            <div className="period-switcher">
+              <button
+                className="period-arrow"
+                type="button"
+                aria-label="Алдыңғы айды ашу"
+                title="Алдыңғы ай"
+                disabled={!canOpenOlderMonth || loading}
+                onClick={() => navigateMonth("older")}
               >
-                {data.months.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-              <ChevronDown size={15} />
-            </label>
-            <button className="secondary-button" onClick={() => setMonthDraft(data.selectedMonth.id)}>
-              <Plus size={17} /> Жаңа ай
+                <ChevronLeft size={17} />
+              </button>
+              <label className="month-select">
+                <span className="period-icon"><CalendarDays size={18} /></span>
+                <span className="period-copy">
+                  <small>Есептік кезең</small>
+                  <select
+                    aria-label="Есептік ай"
+                    value={month}
+                    onChange={(event) => {
+                      setMonth(event.target.value);
+                      void load(event.target.value);
+                    }}
+                  >
+                    {data.months.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </span>
+                <ChevronDown className="period-chevron" size={16} />
+              </label>
+              <button
+                className="period-arrow"
+                type="button"
+                aria-label="Келесі айды ашу"
+                title="Келесі ай"
+                disabled={!canOpenNewerMonth || loading}
+                onClick={() => navigateMonth("newer")}
+              >
+                <ChevronRight size={17} />
+              </button>
+            </div>
+            <button className="month-create-button" type="button" onClick={openMonthDialog}>
+              <span><Plus size={18} /></span>
+              <span><b>Жаңа ай</b><small>Есепті көшіру</small></span>
             </button>
           </div>
         </header>
@@ -765,13 +919,33 @@ export function PayrollApp() {
                 tone="warning"
               />
               <KpiCard
-                label="Операциялық шығын"
+                label="Барлық шығын"
                 value={data.stats.expenseTotal}
                 icon={<ReceiptText size={21} />}
                 detail={`${data.expenses.length} шығын жазбасы`}
                 change={changePercent(data.stats.expenseTotal, previous?.expenseTotal)}
                 tone="plain"
               />
+            </section>
+
+            <section className="dashboard-expense-quick">
+              <span className="quick-expense-icon"><ShoppingBag size={22} /></span>
+              <div className="quick-expense-copy">
+                <span className="eyebrow">Бір реттік төлем</span>
+                <h2>Жаңа шығынды бірден тіркеңіз</h2>
+                <p>Парта, орындық немесе басқа сатып алу келесі айға қайталанбайды.</p>
+              </div>
+              <div className="quick-expense-total">
+                <small>Осы айда</small>
+                <strong>{formatMoney(oneTimeExpenseTotal)}</strong>
+                <span>{oneTimeExpenses.length} жазба</span>
+              </div>
+              <button className="primary-button" onClick={() => openOneTimeExpense()}>
+                <Plus size={17} /> Жаңа шығын
+              </button>
+              <button className="text-button" onClick={() => setView("other-expenses")}>
+                Реестрді ашу
+              </button>
             </section>
 
             <section className="dashboard-grid">
@@ -877,8 +1051,8 @@ export function PayrollApp() {
                     <div className="data-table employee-table">
                       <div className="table-head"><span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Жалпы сома</span><span>Төленді</span><span /></div>
                       {filteredEmployees.map((employee) => (
-                        <div className={`table-row ${employee.archivedAt ? "archived-row" : ""}`} key={employee.id}>
-                          <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b>{employee.position && <small>{employee.position}</small>}</span>{employee.archivedAt && <em>Архив</em>}</span>
+                        <div className="table-row" key={employee.id}>
+                          <span className="person-cell"><i>{employee.employeeName.slice(0, 1).toUpperCase()}</i><span><b>{employee.employeeName}</b>{employee.position && <small>{employee.position}</small>}</span></span>
                           <span><span className="method-chip">{employee.paymentMethodName}</span></span>
                           <span className="money-cell">{formatMoney(employee.baseSalary)}</span>
                           <span className="component-cell">
@@ -897,7 +1071,20 @@ export function PayrollApp() {
                           </span>
                           <span className="row-actions">
                             <button onClick={() => editEmployee(employee)} aria-label="Өзгерту"><Pencil size={16} /></button>
-                            {!employee.archivedAt && <button onClick={() => window.confirm(`${employee.employeeName} архивке жіберілсін бе?`) && void mutate("archiveEmployee", { employeeId: employee.employeeId })} aria-label="Архивтеу"><Archive size={16} /></button>}
+                            <button
+                              className="danger"
+                              onClick={() =>
+                                window.confirm(
+                                  `${employee.employeeName} және оның барлық айлардағы айлық есептері толық өшіріледі. Бұл әрекетті қайтару мүмкін емес. Жалғастыру керек пе?`,
+                                ) &&
+                                void mutate("deleteEmployee", {
+                                  employeeId: employee.employeeId,
+                                })
+                              }
+                              aria-label="Қызметкерді толық өшіру"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </span>
                         </div>
                       ))}
@@ -911,22 +1098,91 @@ export function PayrollApp() {
           </div>
         )}
 
+        {view === "other-expenses" && (
+          <div className="page-content">
+            <section className="other-expense-hero">
+              <div className="other-expense-heading">
+                <span className="quick-expense-icon"><ShoppingBag size={22} /></span>
+                <div>
+                  <span className="eyebrow">Бір реттік шығындар</span>
+                  <h2>{data.selectedMonth.label} реестрі</h2>
+                  <p>Бұл жазбалар тек таңдалған айға есептеледі және келесі айға көшірілмейді.</p>
+                </div>
+              </div>
+              <div className="other-expense-metrics">
+                <div><small>Жалпы сома</small><strong>{formatMoney(oneTimeExpenseTotal)}</strong></div>
+                <div><small>Төленген</small><strong className="success-text">{formatMoney(paidOneTimeExpenseTotal)}</strong></div>
+                <div><small>Қалғаны</small><strong className="primary-text">{formatMoney(oneTimeExpenseTotal - paidOneTimeExpenseTotal)}</strong></div>
+              </div>
+              <button className="primary-button" onClick={() => openOneTimeExpense()}>
+                <Plus size={17} /> Жаңа шығын қосу
+              </button>
+            </section>
+            <section className="panel table-panel">
+              <div className="table-toolbar">
+                <div><span className="eyebrow">Реестр</span><h2>Басқа шығындар</h2></div>
+                <span className="count-chip">{oneTimeExpenses.length} жазба</span>
+              </div>
+              {oneTimeExpenses.length ? (
+                <div className="data-table other-expense-table">
+                  <div className="table-head"><span>Шығын атауы</span><span>Сома</span><span>Төленді</span><span /></div>
+                  {oneTimeExpenses.map((expense) => (
+                    <div className="table-row" key={expense.id}>
+                      <span className="expense-name">
+                        <i><ShoppingBag size={17} /></i>
+                        <span><b>{expense.name}</b><small>Басқа шығындар · бір рет</small></span>
+                      </span>
+                      <strong className="money-cell total-cell">{formatMoney(expense.amount)}</strong>
+                      <span>
+                        <button
+                          className={`paid-toggle ${expense.isPaid ? "checked" : ""}`}
+                          onClick={() => void mutate("toggleExpensePaid", { id: expense.id, isPaid: !expense.isPaid })}
+                          disabled={saving}
+                        >
+                          <i>{expense.isPaid && <Check size={14} />}</i>{expense.isPaid ? "Иә" : "Жоқ"}
+                        </button>
+                      </span>
+                      <span className="row-actions">
+                        <button onClick={() => openOneTimeExpense(expense)} aria-label="Басқа шығынды өзгерту"><Pencil size={16} /></button>
+                        <button
+                          className="danger"
+                          onClick={() => window.confirm(`${expense.name} реестрден өшірілсін бе?`) && void mutate("deleteExpense", { id: expense.id })}
+                          aria-label="Басқа шығынды өшіру"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={<ShoppingBag size={25} />}
+                  title="Басқа шығындар жоқ"
+                  text="Парта, орындық немесе басқа бір реттік сатып алуды осы айдың реестріне қосыңыз."
+                  action={<button className="primary-button" onClick={() => openOneTimeExpense()}><Plus size={17} /> Жаңа шығын қосу</button>}
+                />
+              )}
+            </section>
+          </div>
+        )}
+
         {view === "expenses" && (
           <div className="page-content">
             <section className="expense-hero">
-              <div><span className="eyebrow">Операциялық бюджет</span><strong>{formatMoney(data.stats.expenseTotal)}</strong><p>Айлықтан бөлек барлық шығын</p></div>
-              <div><span>Төленген шығын</span><strong>{formatMoney(data.expenses.filter((expense) => expense.isPaid).reduce((sum, expense) => sum + expense.amount, 0))}</strong></div>
+              <div><span className="eyebrow">Операциялық бюджет</span><strong>{formatMoney(operationalExpenseTotal)}</strong><p>Тұрақты және категориялық шығындар</p></div>
+              <div><span>Төленген шығын</span><strong>{formatMoney(paidOperationalExpenseTotal)}</strong></div>
               <button className="primary-button light" onClick={() => setExpenseDraft({ name: "", categoryId: data.expenseCategories.find((category) => !category.archivedAt)?.id ?? "", amount: 0, isRecurring: true })}><Plus size={18} /> Шығын қосу</button>
             </section>
             <section className="panel table-panel">
               <div className="table-toolbar">
                 <div><span className="eyebrow">Шығындар тізімі</span><h2>{data.selectedMonth.label}</h2></div>
-                <span className="count-chip">{data.expenses.length} жазба</span>
+                <span className="count-chip">{operationalExpenses.length} жазба</span>
               </div>
-              {data.expenses.length ? (
+              {operationalExpenses.length ? (
                 <div className="data-table expense-table">
                   <div className="table-head"><span>Шығын</span><span>Категория</span><span>Қайталанады</span><span>Сома</span><span>Төленді</span><span /></div>
-                  {data.expenses.map((expense) => (
+                  {operationalExpenses.map((expense) => (
                     <div className="table-row" key={expense.id}>
                       <span className="expense-name"><i><ReceiptText size={17} /></i><b>{expense.name}</b></span>
                       <span><span className="method-chip">{expense.categoryName}</span></span>
@@ -973,7 +1229,20 @@ export function PayrollApp() {
               <div className="panel-heading"><div><span className="eyebrow">Шығындар</span><h2>Категориялар</h2></div><button className="small-add" onClick={() => setEntityDraft({ type: "category", name: "" })}><Plus size={16} /> Қосу</button></div>
               <div className="settings-list">
                 {data.expenseCategories.map((category) => (
-                  <div key={category.id}><span><i><ReceiptText size={17} /></i><b>{category.name}</b>{category.archivedAt && <em>Архив</em>}</span><span className="settings-actions"><button onClick={() => setEntityDraft({ type: "category", id: category.id, name: category.name })}><Pencil size={15} /></button>{!category.archivedAt && <button onClick={() => window.confirm(`${category.name} архивтелсін бе?`) && void mutate("archiveExpenseCategory", { id: category.id })}><Archive size={15} /></button>}</span></div>
+                  <div key={category.id}>
+                    <span>
+                      <i><ReceiptText size={17} /></i>
+                      <b>{category.name}</b>
+                      {category.id === OTHER_EXPENSE_CATEGORY_ID && <em>Жүйелік</em>}
+                      {category.archivedAt && <em>Архив</em>}
+                    </span>
+                    {category.id !== OTHER_EXPENSE_CATEGORY_ID && (
+                      <span className="settings-actions">
+                        <button onClick={() => setEntityDraft({ type: "category", id: category.id, name: category.name })}><Pencil size={15} /></button>
+                        {!category.archivedAt && <button onClick={() => window.confirm(`${category.name} архивтелсін бе?`) && void mutate("archiveExpenseCategory", { id: category.id })}><Archive size={15} /></button>}
+                      </span>
+                    )}
+                  </div>
                 ))}
               </div>
             </section>
@@ -987,24 +1256,93 @@ export function PayrollApp() {
       </main>
 
       {monthDraft && (
-        <Modal title="Жаңа есептік ай" subtitle="Алдыңғы айды көшіру" onClose={() => setMonthDraft("")}>
-          <form className="modal-form" onSubmit={(event) => { event.preventDefault(); void mutate("createMonth", { newMonthId: monthDraft }); }}>
-            <p className="modal-note">Белсенді қызметкерлер, айлықтар, қосымшалар және қайталанатын шығындар көшіріледі. Төлем белгілері жаңадан басталады.</p>
-            <label><span>Жаңа ай</span><input required type="month" value={monthDraft} min="2020-01" max="2100-12" onChange={(event) => setMonthDraft(event.target.value)} /></label>
-            <div className="modal-actions"><button type="button" className="ghost-button" onClick={() => setMonthDraft("")}>Болдырмау</button><button className="primary-button" disabled={saving || data.months.some((item) => item.id === monthDraft)}>{saving ? "Көшіріліп жатыр…" : "Айды құру"}</button></div>
+        <Modal title="Жаңа есептік ай" subtitle="Айлық есепті дайындау" onClose={() => setMonthDraft(null)} wide>
+          <form
+            className="modal-form month-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void mutate("createMonth", {
+                newMonthId: monthDraft.targetMonthId,
+                copyRecurringExpenses: monthDraft.copyRecurringExpenses,
+              });
+            }}
+          >
+            <div className="month-setup">
+              <label className="month-target">
+                <span>Құрылатын ай</span>
+                <input
+                  required
+                  type="month"
+                  value={monthDraft.targetMonthId}
+                  min="2020-01"
+                  max="2100-12"
+                  onChange={(event) =>
+                    setMonthDraft({
+                      ...monthDraft,
+                      targetMonthId: event.target.value,
+                    })
+                  }
+                />
+                {data.months.some((item) => item.id === monthDraft.targetMonthId) && (
+                  <small className="field-error">Бұл ай бұрыннан бар. Басқа айды таңдаңыз.</small>
+                )}
+              </label>
+              <div className="month-source-card">
+                <span className="period-icon"><CalendarDays size={19} /></span>
+                <div><small>Көшірілетін есеп</small><strong>{data.selectedMonth.label}</strong></div>
+                <CheckCircle2 size={18} />
+              </div>
+            </div>
+            <div className="copy-preview">
+              <div><span><UsersRound size={18} /></span><div><small>Қызметкерлер</small><strong>{data.stats.employeeCount}</strong></div></div>
+              <div><span><WalletCards size={18} /></span><div><small>Айлық қоры</small><strong>{formatMoney(data.stats.salaryTotal)}</strong></div></div>
+              <div><span><ReceiptText size={18} /></span><div><small>Тұрақты шығындар</small><strong>{formatMoney(recurringExpenseTotal)}</strong><em>{recurringExpenses.length} жазба</em></div></div>
+            </div>
+            <label className="check-label copy-option">
+              <input
+                type="checkbox"
+                checked={monthDraft.copyRecurringExpenses}
+                onChange={(event) =>
+                  setMonthDraft({
+                    ...monthDraft,
+                    copyRecurringExpenses: event.target.checked,
+                  })
+                }
+              />
+              <span><b>Қайталанатын шығындарды көшіру</b><small>Аренда, интернет және тұрақты сервистер жаңа айға қосылады</small></span>
+            </label>
+            <p className="modal-note">
+              Қызметкерлер, негізгі айлық және барлық қосымша/ұсталым көшіріледі.
+              Жаңа ай ашылған соң әр қызметкердің сомасын еркін өзгерте аласыз —
+              өткен ай өзгермейді. «Төленді» белгілері нөлден басталады.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setMonthDraft(null)}>Болдырмау</button>
+              <button
+                className="primary-button"
+                disabled={
+                  saving ||
+                  !monthDraft.targetMonthId ||
+                  data.months.some((item) => item.id === monthDraft.targetMonthId)
+                }
+              >
+                {saving ? "Ай дайындалып жатыр…" : "Айды құрып, ашу"}
+              </button>
+            </div>
           </form>
         </Modal>
       )}
 
       {employeeDraft && (
-        <Modal title={employeeDraft.employeeId ? "Қызметкерді өзгерту" : "Жаңа қызметкер"} subtitle="Айлық деректері" onClose={() => setEmployeeDraft(null)} wide>
+        <Modal title={employeeDraft.employeeId ? "Қызметкерді өзгерту" : "Жаңа қызметкер"} subtitle={`${data.selectedMonth.label} айлық деректері`} onClose={() => setEmployeeDraft(null)} wide>
           <form className="modal-form" onSubmit={(event) => { event.preventDefault(); void mutate("saveEmployee", employeeDraft as unknown as Record<string, unknown>); }}>
+            {employeeDraft.employeeId && <p className="modal-note">Айлыққа енгізілген өзгеріс тек {data.selectedMonth.label} есебіне әсер етеді. Егер төленген сома өзгерсе, «Төленді» белгісі автоматты түрде алынады.</p>}
             <div className="form-grid">
               <label className="span-two"><span>Аты-жөні</span><input required value={employeeDraft.fullName} onChange={(event) => setEmployeeDraft({ ...employeeDraft, fullName: event.target.value })} placeholder="Қызметкердің толық аты" /></label>
               <label className="span-two"><span>Лауазымы</span><input value={employeeDraft.position} onChange={(event) => setEmployeeDraft({ ...employeeDraft, position: event.target.value })} placeholder="Мысалы: Мұғалім, куратор немесе менеджер" /></label>
               <label><span>Бөлім</span><select required value={employeeDraft.departmentId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, departmentId: event.target.value })}>{data.departments.filter((department) => !department.archivedAt).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
               <label><span>Төлем түрі</span><select required value={employeeDraft.paymentMethodId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, paymentMethodId: event.target.value })}>{data.paymentMethods.filter((method) => !method.archivedAt).map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
-              <label className="span-two"><span>Негізгі айлық</span><div className="amount-input"><input required min={0} type="number" value={employeeDraft.baseSalary} onChange={(event) => setEmployeeDraft({ ...employeeDraft, baseSalary: Number(event.target.value) })} /><b>₸</b></div></label>
+              <label className="span-two"><span>Негізгі айлық</span><MoneyInput ariaLabel="Негізгі айлық" value={employeeDraft.baseSalary} onChange={(baseSalary) => setEmployeeDraft({ ...employeeDraft, baseSalary })} /></label>
             </div>
             <div className="components-editor">
               <div className="components-title"><div><strong>Қосымша төлемдер мен ұсталымдар</strong><small>ПС немесе басқа компоненттерді қосыңыз</small></div><button type="button" className="small-add" onClick={() => setEmployeeDraft({ ...employeeDraft, components: [...employeeDraft.components, { id: crypto.randomUUID(), name: employeeDraft.departmentId === "dept-teachers" ? "ПС" : "", kind: "addition", amount: 0 }] })}><Plus size={16} /> Компонент</button></div>
@@ -1012,7 +1350,7 @@ export function PayrollApp() {
                 <div className="component-row" key={component.id}>
                   <input aria-label="Компонент атауы" required value={component.name} placeholder="Мысалы: ПС" onChange={(event) => { const next = [...employeeDraft.components]; next[index] = { ...component, name: event.target.value }; setEmployeeDraft({ ...employeeDraft, components: next }); }} />
                   <select aria-label="Компонент түрі" value={component.kind} onChange={(event) => { const next = [...employeeDraft.components]; next[index] = { ...component, kind: event.target.value as "addition" | "deduction" }; setEmployeeDraft({ ...employeeDraft, components: next }); }}><option value="addition">Қосымша</option><option value="deduction">Ұсталым</option></select>
-                  <div className="amount-input"><input aria-label="Компонент сомасы" required min={0} type="number" value={component.amount} onChange={(event) => { const next = [...employeeDraft.components]; next[index] = { ...component, amount: Number(event.target.value) }; setEmployeeDraft({ ...employeeDraft, components: next }); }} /><b>₸</b></div>
+                  <MoneyInput ariaLabel="Компонент сомасы" value={component.amount} onChange={(amount) => { const next = [...employeeDraft.components]; next[index] = { ...component, amount }; setEmployeeDraft({ ...employeeDraft, components: next }); }} />
                   <button type="button" className="icon-button danger" onClick={() => setEmployeeDraft({ ...employeeDraft, components: employeeDraft.components.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 size={16} /></button>
                 </div>
               ))}
@@ -1024,12 +1362,65 @@ export function PayrollApp() {
         </Modal>
       )}
 
+      {oneTimeExpenseDraft && (
+        <Modal
+          title={oneTimeExpenseDraft.id ? "Шығынды өзгерту" : "Жаңа шығын"}
+          subtitle="Басқа шығындар"
+          onClose={() => setOneTimeExpenseDraft(null)}
+        >
+          <form className="modal-form" onSubmit={(event) => void submitOneTimeExpense(event)}>
+            <p className="modal-note">
+              Категория автоматты түрде «Басқа шығындар» болады. Бұл бір реттік
+              жазба келесі айға көшірілмейді.
+            </p>
+            <label>
+              <span>Шығын атауы</span>
+              <input
+                autoFocus
+                required
+                value={oneTimeExpenseDraft.name}
+                onChange={(event) =>
+                  setOneTimeExpenseDraft({
+                    ...oneTimeExpenseDraft,
+                    name: event.target.value,
+                  })
+                }
+                placeholder="Мысалы: Парта немесе орындық сатып алу"
+              />
+            </label>
+            <label>
+              <span>Сома</span>
+              <MoneyInput
+                ariaLabel="Басқа шығын сомасы"
+                value={oneTimeExpenseDraft.amount}
+                onChange={(amount) =>
+                  setOneTimeExpenseDraft({ ...oneTimeExpenseDraft, amount })
+                }
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setOneTimeExpenseDraft(null)}>Болдырмау</button>
+              <button
+                className="primary-button"
+                disabled={
+                  saving ||
+                  !oneTimeExpenseDraft.name.trim() ||
+                  oneTimeExpenseDraft.amount <= 0
+                }
+              >
+                {saving ? "Сақталуда…" : oneTimeExpenseDraft.id ? "Сақтау" : "Реестрге қосу"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {expenseDraft && (
         <Modal title={expenseDraft.id ? "Шығынды өзгерту" : "Жаңа шығын"} onClose={() => setExpenseDraft(null)}>
           <form className="modal-form" onSubmit={(event) => { event.preventDefault(); void mutate("saveExpense", expenseDraft as unknown as Record<string, unknown>); }}>
             <label><span>Шығын атауы</span><input required value={expenseDraft.name} onChange={(event) => setExpenseDraft({ ...expenseDraft, name: event.target.value })} placeholder="Мысалы: Кеңсе арендасы" /></label>
             <label><span>Категория</span><select required value={expenseDraft.categoryId} onChange={(event) => setExpenseDraft({ ...expenseDraft, categoryId: event.target.value })}>{data.expenseCategories.filter((category) => !category.archivedAt).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-            <label><span>Сома</span><div className="amount-input"><input required min={0} type="number" value={expenseDraft.amount} onChange={(event) => setExpenseDraft({ ...expenseDraft, amount: Number(event.target.value) })} /><b>₸</b></div></label>
+            <label><span>Сома</span><MoneyInput ariaLabel="Шығын сомасы" value={expenseDraft.amount} onChange={(amount) => setExpenseDraft({ ...expenseDraft, amount })} /></label>
             <label className="check-label"><input type="checkbox" checked={expenseDraft.isRecurring} onChange={(event) => setExpenseDraft({ ...expenseDraft, isRecurring: event.target.checked })} /><span><b>Әр ай сайын қайталанады</b><small>Жаңа айға автоматты көшіріледі</small></span></label>
             <div className="modal-actions"><button type="button" className="ghost-button" onClick={() => setExpenseDraft(null)}>Болдырмау</button><button className="primary-button" disabled={saving}>{saving ? "Сақталуда…" : "Сақтау"}</button></div>
           </form>

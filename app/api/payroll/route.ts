@@ -7,6 +7,10 @@ import {
   getRawDb,
   loadPayrollData,
 } from "@/lib/database";
+import {
+  OTHER_EXPENSE_CATEGORY_ID,
+  OTHER_EXPENSE_CATEGORY_NAME,
+} from "@/lib/expenses";
 import type { SalaryComponentKind } from "@/lib/types";
 
 type ActionBody = {
@@ -111,6 +115,10 @@ export async function POST(request: Request) {
         .bind(sourceId)
         .first();
       if (!source) throw new Error("Көшірілетін ай табылмады.");
+      const copyRecurringExpenses =
+        body.copyRecurringExpenses === undefined
+          ? true
+          : flag(body.copyRecurringExpenses);
 
       const employees = (
         await db
@@ -154,20 +162,22 @@ export async function POST(request: Request) {
             amount: number;
           }>()
       ).results;
-      const recurringExpenses = (
-        await db
-          .prepare(
-            `SELECT category_id, category_name, name, amount
-             FROM expenses WHERE month_id = ? AND is_recurring = 1`,
-          )
-          .bind(sourceId)
-          .all<{
-            category_id: string;
-            category_name: string;
-            name: string;
-            amount: number;
-          }>()
-      ).results;
+      const recurringExpenses = copyRecurringExpenses
+        ? (
+            await db
+              .prepare(
+                `SELECT category_id, category_name, name, amount
+                 FROM expenses WHERE month_id = ? AND is_recurring = 1`,
+              )
+              .bind(sourceId)
+              .all<{
+                category_id: string;
+                category_name: string;
+                name: string;
+                amount: number;
+              }>()
+          ).results
+        : [];
       const statements = [
         db
           .prepare(
@@ -251,14 +261,20 @@ export async function POST(request: Request) {
         .bind(paid ? 1 : 0, paid ? new Date().toISOString() : null, id)
         .run();
     } else if (action === "toggleExpensePaid") {
+      const selectedMonth = monthId(body.monthId);
       const id = text(body.id, "Шығын");
       const paid = flag(body.isPaid);
       await db
         .prepare(
           `UPDATE expenses SET is_paid = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
+           WHERE id = ? AND month_id = ?`,
         )
-        .bind(paid ? 1 : 0, paid ? new Date().toISOString() : null, id)
+        .bind(
+          paid ? 1 : 0,
+          paid ? new Date().toISOString() : null,
+          id,
+          selectedMonth,
+        )
         .run();
     } else if (action === "saveEmployee") {
       const selectedMonth = monthId(body.monthId);
@@ -406,14 +422,83 @@ export async function POST(request: Request) {
         );
       }
       await db.batch(statements);
-    } else if (action === "archiveEmployee") {
+    } else if (action === "deleteEmployee") {
       const id = text(body.employeeId, "Қызметкер");
-      await db
+      await db.batch([
+        db
+          .prepare(
+            `DELETE FROM salary_components
+             WHERE salary_snapshot_id IN (
+               SELECT id FROM salary_snapshots WHERE employee_id = ?
+             )`,
+          )
+          .bind(id),
+        db
+          .prepare("DELETE FROM salary_snapshots WHERE employee_id = ?")
+          .bind(id),
+        db.prepare("DELETE FROM employees WHERE id = ?").bind(id),
+      ]);
+    } else if (action === "saveOneTimeExpense") {
+      const selectedMonth = monthId(body.monthId);
+      const id = body.id ? text(body.id, "Шығын") : crypto.randomUUID();
+      const name = text(body.name, "Шығын атауы");
+      const amount = money(body.amount, "Шығын сомасы");
+      if (amount <= 0) throw new Error("Шығын сомасы 0 ₸-ден жоғары болуы керек.");
+      const category = await db
         .prepare(
-          "UPDATE employees SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "SELECT id FROM expense_categories WHERE id = ? AND archived_at IS NULL",
         )
-        .bind(id)
-        .run();
+        .bind(OTHER_EXPENSE_CATEGORY_ID)
+        .first<{ id: string }>();
+      if (!category) throw new Error("«Басқа шығындар» категориясы табылмады.");
+
+      if (body.id) {
+        const current = await db
+          .prepare(
+            `SELECT amount FROM expenses
+             WHERE id = ? AND month_id = ? AND category_id = ? AND is_recurring = 0`,
+          )
+          .bind(id, selectedMonth, category.id)
+          .first<{ amount: number }>();
+        if (!current) throw new Error("Бір реттік шығын табылмады.");
+        await db
+          .prepare(
+            `UPDATE expenses
+             SET category_id = ?, category_name = ?, name = ?, amount = ?,
+                 is_recurring = 0,
+                 is_paid = CASE WHEN amount <> ? THEN 0 ELSE is_paid END,
+                 paid_at = CASE WHEN amount <> ? THEN NULL ELSE paid_at END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND month_id = ?`,
+          )
+          .bind(
+            category.id,
+            OTHER_EXPENSE_CATEGORY_NAME,
+            name,
+            amount,
+            amount,
+            amount,
+            id,
+            selectedMonth,
+          )
+          .run();
+      } else {
+        await db
+          .prepare(
+            `INSERT INTO expenses
+             (id, month_id, category_id, category_name, name, amount, is_recurring)
+             VALUES (?, ?, ?, ?, ?, ?, 0)`,
+          )
+          .bind(
+            id,
+            selectedMonth,
+            category.id,
+            OTHER_EXPENSE_CATEGORY_NAME,
+            name,
+            amount,
+          )
+          .run();
+      }
     } else if (action === "saveExpense") {
       const selectedMonth = monthId(body.monthId);
       const id = body.id ? text(body.id, "Шығын") : crypto.randomUUID();
@@ -428,15 +513,31 @@ export async function POST(request: Request) {
       if (!category) throw new Error("Шығын категориясы табылмады.");
       if (body.id) {
         const current = await db
-          .prepare("SELECT amount FROM expenses WHERE id = ?")
-          .bind(id)
-          .first<{ amount: number }>();
+          .prepare(
+            `SELECT amount, category_id, is_recurring
+             FROM expenses WHERE id = ? AND month_id = ?`,
+          )
+          .bind(id, selectedMonth)
+          .first<{
+            amount: number;
+            category_id: string;
+            is_recurring: number;
+          }>();
+        if (!current) throw new Error("Шығын табылмады.");
+        if (
+          current.category_id === OTHER_EXPENSE_CATEGORY_ID &&
+          current.is_recurring === 0
+        ) {
+          throw new Error(
+            "Бір реттік шығынды «Басқа шығындар» реестрінен өзгертіңіз.",
+          );
+        }
         await db
           .prepare(
             `UPDATE expenses SET category_id = ?, category_name = ?, name = ?, amount = ?,
              is_recurring = ?, is_paid = CASE WHEN amount <> ? THEN 0 ELSE is_paid END,
              paid_at = CASE WHEN amount <> ? THEN NULL ELSE paid_at END,
-             updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+             updated_at = CURRENT_TIMESTAMP WHERE id = ? AND month_id = ?`,
           )
           .bind(
             categoryId,
@@ -447,9 +548,9 @@ export async function POST(request: Request) {
             amount,
             amount,
             id,
+            selectedMonth,
           )
           .run();
-        if (!current) throw new Error("Шығын табылмады.");
       } else {
         await db
           .prepare(
@@ -469,9 +570,10 @@ export async function POST(request: Request) {
           .run();
       }
     } else if (action === "deleteExpense") {
+      const selectedMonth = monthId(body.monthId);
       await db
-        .prepare("DELETE FROM expenses WHERE id = ?")
-        .bind(text(body.id, "Шығын"))
+        .prepare("DELETE FROM expenses WHERE id = ? AND month_id = ?")
+        .bind(text(body.id, "Шығын"), selectedMonth)
         .run();
     } else if (action === "saveDepartment") {
       const id = body.id ? text(body.id, "Бөлім") : crypto.randomUUID();
@@ -569,6 +671,9 @@ export async function POST(request: Request) {
       const id = body.id ? text(body.id, "Категория") : crypto.randomUUID();
       const name = text(body.name, "Категория атауы");
       const selectedMonth = monthId(body.monthId);
+      if (body.id && id === OTHER_EXPENSE_CATEGORY_ID) {
+        throw new Error("«Басқа шығындар» — жүйелік категория және өзгертілмейді.");
+      }
       if (body.id) {
         await db.batch([
           db
@@ -598,6 +703,9 @@ export async function POST(request: Request) {
       }
     } else if (action === "archiveExpenseCategory") {
       const id = text(body.id, "Категория");
+      if (id === OTHER_EXPENSE_CATEGORY_ID) {
+        throw new Error("«Басқа шығындар» жүйелік категориясын архивтеуге болмайды.");
+      }
       await db
         .prepare(
           "UPDATE expense_categories SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

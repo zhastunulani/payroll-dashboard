@@ -1,4 +1,8 @@
 import { buildBreakdown, computeStats, monthLabel, salaryTotal } from "./calculations";
+import {
+  OTHER_EXPENSE_CATEGORY_ID,
+  OTHER_EXPENSE_CATEGORY_NAME,
+} from "./expenses";
 import { PostgresDatabase } from "./postgres-database";
 import type {
   ExpenseRecord,
@@ -181,7 +185,7 @@ async function initializeDatabase(): Promise<void> {
       ["expense-internet", "Интернет", 2],
       ["expense-tech", "Техникалық сервистер", 3],
       ["expense-subscriptions", "Подписка", 4],
-      ["expense-other", "Басқа", 5],
+      [OTHER_EXPENSE_CATEGORY_ID, OTHER_EXPENSE_CATEGORY_NAME, 5],
     ].map(([id, name, order]) =>
       db
         .prepare(
@@ -189,6 +193,28 @@ async function initializeDatabase(): Promise<void> {
         )
         .bind(id, name, order),
     ),
+    db
+      .prepare(
+        `UPDATE expense_categories
+         SET name = ?, archived_at = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND (name <> ? OR archived_at IS NOT NULL)`,
+      )
+      .bind(
+        OTHER_EXPENSE_CATEGORY_NAME,
+        OTHER_EXPENSE_CATEGORY_ID,
+        OTHER_EXPENSE_CATEGORY_NAME,
+      ),
+    db
+      .prepare(
+        `UPDATE expenses
+         SET category_name = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE category_id = ? AND category_name <> ?`,
+      )
+      .bind(
+        OTHER_EXPENSE_CATEGORY_NAME,
+        OTHER_EXPENSE_CATEGORY_ID,
+        OTHER_EXPENSE_CATEGORY_NAME,
+      ),
     db
       .prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('session_version', '1')"),
   ];
@@ -250,8 +276,8 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
             s.payment_method_id, s.payment_method_name, s.base_salary, s.is_paid,
             s.paid_at, e.archived_at
      FROM salary_snapshots s
-     LEFT JOIN employees e ON e.id = s.employee_id
-     WHERE s.month_id = ?
+     JOIN employees e ON e.id = s.employee_id
+     WHERE s.month_id = ? AND e.archived_at IS NULL
      ORDER BY s.department_name, s.employee_name`,
     monthId,
   );
@@ -259,7 +285,8 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
     `SELECT c.id, c.salary_snapshot_id, c.name, c.kind, c.amount
      FROM salary_components c
      JOIN salary_snapshots s ON s.id = c.salary_snapshot_id
-     WHERE s.month_id = ?
+     JOIN employees e ON e.id = s.employee_id
+     WHERE s.month_id = ? AND e.archived_at IS NULL
      ORDER BY c.created_at, c.id`,
     monthId,
   );

@@ -25,8 +25,9 @@
 
 - Next.js 16, React 19 және TypeScript;
 - Neon Serverless Postgres;
-- `pg` драйвері және pooled Neon connection string;
-- Render Web Service және репозиторийдегі `render.yaml`;
+- Cloudflare-мен үйлесімді `@neondatabase/serverless` HTTP драйвері;
+- Cloudflare Workers Free және `@opennextjs/cloudflare`;
+- Render Web Service тек резервтік deployment ретінде сақталған;
 - PBKDF2 арқылы хэштелген ортақ пароль;
 - `HttpOnly`, `SameSite=Strict`, production-да `Secure` сессия cookie-і.
 
@@ -89,7 +90,7 @@ Postgres кестелері мен бастапқы анықтамалықтар
 2. **Connect** терезесінен pooled connection string көшіріңіз.
 3. Connection string ішінде TLS параметрі (`sslmode=require`) бар екенін
    тексеріңіз.
-4. Мәнді жергілікті `.env.local` және Render-дегі құпия `DATABASE_URL`
+4. Мәнді жергілікті `.env.local` және Cloudflare-дегі құпия `DATABASE_URL`
    айнымалысына ғана сақтаңыз.
 5. Қосымшаны іске қосып, `/api/health` endpoint-і
    `{"status":"ok"}` қайтаратынын тексеріңіз.
@@ -191,54 +192,68 @@ checkbox-ты босатып, тек қажетті 2–3 қызметкерді
 және жұмсалған сомаға кіреді де, айдың қалған сомасынан бірден шегеріледі.
 Жазба операциялық шығындар тізімінде қайталанбайды және жаңа айға көшірілмейді.
 
-## Render-ге жариялау
+## Cloudflare Workers Free-ге жариялау
 
-Жоба Render Blueprint арқылы жарияланады. `render.yaml` мына параметрлерді
-дайындап қойған:
+Негізгі production deployment — Cloudflare Workers Free. Worker сұраныс келгенде
+Cloudflare edge runtime ішінде бірден орындалады және Render Free Web Service
+сияқты 15 минуттан кейін sleep режиміне өтпейді. Сол себепті UptimeRobot
+keep-alive қажет емес.
 
-- Node.js Web Service;
-- `npm ci --include=dev && npm run build` build командасы;
-- `npm start` іске қосу командасы;
-- `main` branch үшін автоматты deployment;
-- `/api/health` health check;
-- Neon базасын қозғамайтын `/api/ping` keep-alive endpoint-і;
-- `DATABASE_URL` және `APP_PASSWORD_HASH` құпия айнымалылары;
-- Render автоматты жасайтын `SESSION_SECRET`.
+Қолданылатын файлдар:
 
-Жариялау реті:
+- `wrangler.jsonc` — Worker атауы, assets, compatibility және міндетті secrets;
+- `open-next.config.ts` — Next.js → Cloudflare Workers адаптері;
+- `scripts/cloudflare-command.mjs` — Windows-тағы кирилл жолдарына арналған
+  қауіпсіз build workaround;
+- `.dev.vars` — тек жергілікті preview құпиялары, Git-ке кірмейді.
 
-1. Кодты жеке GitHub репозиторийінің `main` branch-іне push жасаңыз.
-2. Render Dashboard-та Blueprint ашыңыз:
-   `https://dashboard.render.com/blueprint/new?repo=https://github.com/OWNER/payroll-dashboard`
-3. Private репозиторийге қол жеткізу сұралса, Render-ге GitHub рұқсатын беріңіз.
-4. `DATABASE_URL` және `APP_PASSWORD_HASH` мәндерін енгізіңіз.
-5. Blueprint-ті қолданып, deployment аяқталғанша күтіңіз.
-6. Render URL ішіндегі `/api/health` endpoint-і 200 жауап бергенін тексеріңіз.
-7. Ортақ парольмен кіріп, дашборд пен импортты тексеріңіз.
+Жергілікті Worker preview:
 
-Құпия айнымалыларды `render.yaml` файлына немесе GitHub репозиторийіне
-жазбаңыз.
+```powershell
+npm run sync:worker-env
+npm run build:worker
+npm run preview:worker
+```
 
-### Render Free keep-alive
+Preview әдетте `http://127.0.0.1:8787` мекенжайында ашылады. Тексеріңіз:
 
-`render.yaml` ішінде `plan: free` сақталған. Render Free Web Service 15 минут
-кіріс трафигі болмаса sleep режиміне өтеді. Бұл шектеуді ресми түрде өшіру
-мүмкін емес, сондықтан тегін workaround ретінде UptimeRobot қолданылады:
+- `/api/ping` → `200` және `{"status":"ok"}`;
+- `/api/health` → `200` және Neon байланысы жұмыс істейді;
+- парольсіз `/api/payroll` → `401`;
+- ортақ парольмен кіргеннен кейін дашборд деректері ашылады.
 
-1. [UptimeRobot](https://uptimerobot.com/) сервисінде тегін аккаунт ашыңыз.
-2. **HTTP(s) Monitor** қосыңыз.
-3. Friendly name: `Payroll Dashboard`.
-4. URL: `https://payroll-dashboard-62jf.onrender.com/api/ping`.
-5. Monitoring interval: `5 minutes`.
-6. Keyword тексеруі қолжетімді болса, `"status":"ok"` мәнін қолданыңыз.
-7. Аккаунт email-іне downtime хабарламаларын қосыңыз.
+Алғашқы production deployment:
 
-`/api/ping` тек `{"status":"ok"}` қайтарады және Neon базасына SQL сұранысын
-жібермейді. `/api/health` Render deployment health check үшін базаны тексере
-береді. UptimeRobot сұранысы сайтты бос қалдырмайды, бірақ бұл ақылы Render
-instance сияқты SLA бермейді: Render тегін сервисті техникалық себеппен қайта
-іске қоса алады. Ресми шектеулер:
-[Render Free](https://render.com/docs/free).
+```powershell
+npx wrangler login --use-keyring
+npx wrangler whoami
+npm run deploy:worker -- --secrets-file .env.local
+```
+
+`--secrets-file .env.local` үш міндетті құпияны Worker-ге шифрланған secret
+ретінде жүктейді:
+
+- `DATABASE_URL`;
+- `APP_PASSWORD_HASH`;
+- `SESSION_SECRET`.
+
+Құпия мәндерді `wrangler.jsonc`, README немесе GitHub репозиторийіне
+жазбаңыз. Deployment аяқталған соң Wrangler берген `*.workers.dev` URL ішінде
+`/api/health`, кіру және қорғалған Payroll API тексеріледі.
+
+Cloudflare Workers Free тарифінде UptimeRobot қажет емес. Қазіргі тегін лимит
+күніне 100 000 сұраныс; платформа тарифі болашақта өзгеруі мүмкін, сондықтан
+«мәңгі тегін» коммерциялық кепілдік емес, бірақ бұл архитектурада idle sleep
+жоқ. Ресми мәліметтер:
+[Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+және
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
+
+### Render резервтік deployment
+
+`render.yaml` ішіндегі `plan: free` өзгертілмеген. Ол резервтік нұсқа ретінде
+қалады, бірақ Render Free динамикалық сервисі бос тұрған кезде sleep режиміне
+өтетіндіктен негізгі always-ready URL ретінде қолданылмайды.
 
 ## Тексеру командалары
 
@@ -246,14 +261,16 @@ instance сияқты SLA бермейді: Render тегін сервисті �
 npm run test:unit
 npm run typecheck
 npm run build
+npm run build:worker
 npm run lint
 npm test
 ```
 
 `npm test` есептеу логикасын, ақша форматтау мен ай ауысуын, бір реттік
-шығындардың жаңа айға көшірілмеуін, `/api/ping` жауабын, Render Free
-конфигурациясын, D1-синтаксисінен Postgres SQL-іне түрлендіруді, production
-build-ті және серверлік пароль қорғанысын тексереді.
+шығындардың жаңа айға көшірілмеуін, `/api/ping` жауабын, Cloudflare Worker
+конфигурациясын, Render резервтік Free конфигурациясын, D1-синтаксисінен
+Postgres SQL-іне түрлендіруді, production build-ті және серверлік пароль
+қорғанысын тексереді.
 
 ## Қауіпсіздік және Git ережелері
 
@@ -265,9 +282,10 @@ build-ті және серверлік пароль қорғанысын тек�
 - Импорт файлын репозиторий папкасына көшірмей, сыртқы қауіпсіз папкадан
   таңдаңыз.
 - Бизнес беттері мен `/api/payroll` ортақ пароль сессиясын талап етеді.
-- `/api/health` Render мониторингі үшін ашық, бірақ ол қаржылық дерек
+- `/api/health` deployment мониторингі үшін ашық, бірақ ол қаржылық дерек
   қайтармайды.
-- `/api/ping` keep-alive үшін ашық және дерекқорға қосылмайды.
+- `/api/ping` жеңіл availability тексерісі үшін ашық және дерекқорға
+  қосылмайды.
 - Ортақ пароль Баптаулар бетінен өзгертілгенде, жаңа хэш Neon базасына
   жазылады және барлық бұрынғы сессиялар жарамсыз болады.
 

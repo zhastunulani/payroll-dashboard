@@ -1,6 +1,8 @@
-import { Pool, type PoolClient, type QueryResultRow } from "pg";
-
-type QueryExecutor = Pick<Pool, "query"> | Pick<PoolClient, "query">;
+import {
+  neon,
+  type FullQueryResults,
+  type NeonQueryFunction,
+} from "@neondatabase/serverless";
 
 export function postgresQuery(sql: string): string {
   let query = sql.trim();
@@ -50,14 +52,14 @@ export class PostgresStatement {
 }
 
 export class PostgresDatabase {
-  private readonly pool: Pool;
+  private readonly sql: NeonQueryFunction<false, true>;
 
   constructor(connectionString: string) {
-    this.pool = new Pool({
-      connectionString,
-      max: 5,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 15_000,
+    this.sql = neon(connectionString, {
+      fullResults: true,
+      fetchOptions: {
+        cache: "no-store",
+      },
     });
   }
 
@@ -67,9 +69,8 @@ export class PostgresDatabase {
 
   async execute(
     statement: PostgresStatement,
-    executor: QueryExecutor = this.pool,
-  ) {
-    return executor.query<QueryResultRow>(
+  ): Promise<FullQueryResults<false>> {
+    return this.sql.query(
       postgresQuery(statement.sql),
       statement.values,
     );
@@ -79,24 +80,19 @@ export class PostgresDatabase {
     statements: PostgresStatement[],
   ): Promise<Array<{ success: true; meta: { changes: number } }>> {
     if (!statements.length) return [];
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const results = [];
-      for (const statement of statements) {
-        const result = await this.execute(statement, client);
-        results.push({
-          success: true as const,
-          meta: { changes: result.rowCount ?? 0 },
-        });
-      }
-      await client.query("COMMIT");
-      return results;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    const results = await this.sql.transaction(
+      (transaction) =>
+        statements.map((statement) =>
+          transaction.query(
+            postgresQuery(statement.sql),
+            statement.values,
+          ),
+        ),
+      { fullResults: true },
+    );
+    return results.map((result) => ({
+      success: true,
+      meta: { changes: result.rowCount ?? 0 },
+    }));
   }
 }

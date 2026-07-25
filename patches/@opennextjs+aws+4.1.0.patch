@@ -1,0 +1,18 @@
+diff --git a/node_modules/@opennextjs/aws/dist/build/helper.js b/node_modules/@opennextjs/aws/dist/build/helper.js
+index 6524181..aeac1c3 100644
+--- a/node_modules/@opennextjs/aws/dist/build/helper.js
++++ b/node_modules/@opennextjs/aws/dist/build/helper.js
+@@ -348,7 +348,12 @@ export function initOutputDir(options) {
+     fs.rmSync(options.outputDir, { recursive: true, force: true });
+     const { buildDir } = options;
+     fs.mkdirSync(buildDir, { recursive: true });
+-    fs.cpSync(options.tempBuildDir, buildDir, { recursive: true });
++    for (const configFile of ["open-next.config.mjs", "open-next.config.edge.mjs"]) {
++        const source = path.join(options.tempBuildDir, configFile);
++        if (fs.existsSync(source)) {
++            fs.copyFileSync(source, path.join(buildDir, configFile));
++        }
++    }
+ }
+ /**
+  * @returns Whether the edge runtime is used

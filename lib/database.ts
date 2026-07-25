@@ -46,6 +46,13 @@ export async function ensureDatabase(): Promise<void> {
 
 async function initializeDatabase(): Promise<void> {
   const db = getRawDb();
+  const existingSchema = await db
+    .prepare(
+      "SELECT to_regclass('public.app_settings')::text AS table_name",
+    )
+    .first<{ table_name: string | null }>();
+  if (existingSchema?.table_name) return;
+
   const statements = [
     `CREATE TABLE IF NOT EXISTS months (
       id TEXT PRIMARY KEY,

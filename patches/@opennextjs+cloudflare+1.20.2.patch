@@ -1,0 +1,33 @@
+diff --git a/node_modules/@opennextjs/cloudflare/dist/cli/build/utils/copy-package-cli-files.js b/node_modules/@opennextjs/cloudflare/dist/cli/build/utils/copy-package-cli-files.js
+index 21e50bc..2a45a04 100644
+--- a/node_modules/@opennextjs/cloudflare/dist/cli/build/utils/copy-package-cli-files.js
++++ b/node_modules/@opennextjs/cloudflare/dist/cli/build/utils/copy-package-cli-files.js
+@@ -1,6 +1,19 @@
+ import fs from "node:fs";
+ import path from "node:path";
+ import { getOutputWorkerPath } from "../bundle-server.js";
++function copyDirectory(sourceDir, destinationDir) {
++    fs.mkdirSync(destinationDir, { recursive: true });
++    for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
++        const source = path.join(sourceDir, entry.name);
++        const destination = path.join(destinationDir, entry.name);
++        if (entry.isDirectory()) {
++            copyDirectory(source, destination);
++        }
++        else {
++            fs.copyFileSync(source, destination);
++        }
++    }
++}
+ /**
+  * Copies
+  * - the template files present in the cloudflare adapter package to `.open-next/cloudflare-templates`
+@@ -10,7 +23,6 @@ export function copyPackageCliFiles(packageDistDir, buildOpts) {
+     console.log("# copyPackageTemplateFiles");
+     const sourceDir = path.join(packageDistDir, "cli/templates");
+     const destinationDir = path.join(buildOpts.outputDir, "cloudflare-templates");
+-    fs.mkdirSync(destinationDir, { recursive: true });
+-    fs.cpSync(sourceDir, destinationDir, { recursive: true });
++    copyDirectory(sourceDir, destinationDir);
+     fs.copyFileSync(path.join(packageDistDir, "cli/templates/worker.js"), getOutputWorkerPath(buildOpts));
+ }

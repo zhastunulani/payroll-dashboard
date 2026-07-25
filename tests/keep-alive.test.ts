@@ -18,7 +18,38 @@ test("public ping responds without touching protected payroll data", async () =>
   assert.doesNotMatch(route, /database|payroll|salary|expense/i);
 });
 
-test("Render remains on the free instance plan", async () => {
+test("Cloudflare Worker uses the free-compatible always-ready configuration", async () => {
+  const workerConfig = JSON.parse(
+    await readFile(new URL("wrangler.jsonc", root), "utf8"),
+  ) as {
+    name: string;
+    main: string;
+    compatibility_flags: string[];
+    assets: { directory: string };
+    secrets: { required: string[] };
+  };
+  assert.equal(workerConfig.name, "payroll-dashboard");
+  assert.equal(workerConfig.main, ".open-next/worker.js");
+  assert.deepEqual(workerConfig.compatibility_flags, ["nodejs_compat"]);
+  assert.equal(workerConfig.assets.directory, ".open-next/assets");
+  assert.deepEqual(workerConfig.secrets.required.sort(), [
+    "APP_PASSWORD_HASH",
+    "DATABASE_URL",
+    "SESSION_SECRET",
+  ]);
+
+  const packageJson = JSON.parse(
+    await readFile(new URL("package.json", root), "utf8"),
+  ) as {
+    scripts: Record<string, string>;
+    dependencies: Record<string, string>;
+  };
+  assert.match(packageJson.scripts["build:worker"], /cloudflare-command/);
+  assert.ok(packageJson.dependencies["@neondatabase/serverless"]);
+  assert.equal(packageJson.dependencies.pg, undefined);
+});
+
+test("Render fallback remains on the free instance plan", async () => {
   const blueprint = await readFile(new URL("render.yaml", root), "utf8");
   assert.match(blueprint, /^\s+plan:\s+free\s*$/m);
   assert.doesNotMatch(blueprint, /^\s+plan:\s+(starter|standard|pro)\s*$/m);

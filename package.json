@@ -9,30 +9,38 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
+    "build:worker": "node scripts/cloudflare-command.mjs build",
+    "preview:worker": "npm run build:worker && node scripts/cloudflare-command.mjs preview",
+    "deploy:worker": "npm run build:worker && node scripts/cloudflare-command.mjs deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "sync:worker-env": "node scripts/sync-cloudflare-dev-env.mjs",
+    "postinstall": "patch-package",
     "hash-password": "node scripts/hash-password.mjs",
     "test:unit": "node --experimental-transform-types --test tests/calculations.test.ts tests/postgres-database.test.ts tests/money.test.ts tests/months.test.ts tests/payroll-import.test.ts tests/bulk-employees.test.ts tests/expenses.test.ts tests/keep-alive.test.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern outputs"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .open-next --ignore-pattern .open-next-copytest* --ignore-pattern .wrangler --ignore-pattern outputs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "lucide-react": "^0.468.0",
     "next": "16.2.11",
-    "pg": "^8.22.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "read-excel-file": "^9.3.4"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.2",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
-    "@types/pg": "^8.20.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.11",
+    "patch-package": "^8.0.1",
     "tailwindcss": "4.2.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wrangler": "^4.114.0"
   },
   "overrides": {
     "postcss": "8.5.22",

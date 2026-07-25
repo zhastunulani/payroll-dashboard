@@ -118,7 +118,7 @@ export async function POST(request: Request) {
 
     if (action === "createMonth") {
       const targetId = monthId(body.newMonthId);
-      const sourceId = monthId(body.monthId);
+      const sourceId = monthId(body.sourceMonthId ?? body.monthId);
       const exists = await db
         .prepare("SELECT id FROM months WHERE id = ?")
         .bind(targetId)
@@ -263,6 +263,82 @@ export async function POST(request: Request) {
       }
       await db.batch(statements);
       return Response.json(await loadPayrollData(targetId));
+    }
+
+    if (action === "resetMonthPayments") {
+      const targetId = monthId(body.targetMonthId);
+      const selectedMonth = monthId(body.monthId);
+      const target = await db
+        .prepare("SELECT id FROM months WHERE id = ?")
+        .bind(targetId)
+        .first();
+      if (!target) throw new Error("Сброс жасалатын ай табылмады.");
+
+      await db.batch([
+        db
+          .prepare(
+            `UPDATE salary_snapshots
+             SET is_paid = 0, paid_at = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE month_id = ?`,
+          )
+          .bind(targetId),
+        db
+          .prepare(
+            `UPDATE expenses
+             SET is_paid = 0, paid_at = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE month_id = ?
+               AND (category_id <> ? OR is_recurring <> 0)`,
+          )
+          .bind(targetId, OTHER_EXPENSE_CATEGORY_ID),
+      ]);
+
+      return Response.json(await loadPayrollData(selectedMonth));
+    }
+
+    if (action === "deleteMonth") {
+      const targetId = monthId(body.targetMonthId);
+      const selectedMonth = monthId(body.monthId);
+      const target = await db
+        .prepare("SELECT id FROM months WHERE id = ?")
+        .bind(targetId)
+        .first();
+      if (!target) throw new Error("Өшірілетін ай табылмады.");
+
+      const monthCount = await db
+        .prepare("SELECT COUNT(*) AS count FROM months")
+        .first<{ count: number | string }>();
+      if (Number(monthCount?.count ?? 0) <= 1) {
+        throw new Error("Соңғы есептік айды өшіруге болмайды.");
+      }
+
+      await db.batch([
+        db
+          .prepare(
+            `DELETE FROM salary_components
+             WHERE salary_snapshot_id IN (
+               SELECT id FROM salary_snapshots WHERE month_id = ?
+             )`,
+          )
+          .bind(targetId),
+        db
+          .prepare("DELETE FROM salary_snapshots WHERE month_id = ?")
+          .bind(targetId),
+        db
+          .prepare("DELETE FROM expenses WHERE month_id = ?")
+          .bind(targetId),
+        db
+          .prepare(
+            `UPDATE months
+             SET source_month_id = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE source_month_id = ?`,
+          )
+          .bind(targetId),
+        db.prepare("DELETE FROM months WHERE id = ?").bind(targetId),
+      ]);
+
+      return Response.json(
+        await loadPayrollData(selectedMonth === targetId ? undefined : selectedMonth),
+      );
     }
 
     if (action === "toggleSalaryPaid") {

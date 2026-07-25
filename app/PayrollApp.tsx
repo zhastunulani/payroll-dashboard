@@ -13,16 +13,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Copy,
   FileSpreadsheet,
   LayoutDashboard,
   LogOut,
   Pencil,
   Plus,
   ReceiptText,
+  RotateCcw,
   Search,
   Settings,
   ShoppingBag,
   Trash2,
+  TriangleAlert,
   Upload,
   UsersRound,
   WalletCards,
@@ -61,6 +64,7 @@ type View =
   | "settings";
 type EntityType = "department" | "method" | "category";
 type SettingsSection =
+  | "months"
   | "employees"
   | "departments"
   | "methods"
@@ -308,8 +312,15 @@ type ExpenseDraft = {
 };
 
 type MonthDraft = {
+  sourceMonthId: string;
   targetMonthId: string;
   copyRecurringExpenses: boolean;
+};
+
+type MonthActionDraft = {
+  type: "reset" | "delete";
+  monthId: string;
+  label: string;
 };
 
 type OneTimeExpenseDraft = {
@@ -341,7 +352,7 @@ function importRowTotal(row: ImportRow): number {
 export function PayrollApp() {
   const [view, setView] = useState<View>("dashboard");
   const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("employees");
+    useState<SettingsSection>("months");
   const [data, setData] = useState<PayrollData | null>(null);
   const [month, setMonth] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("");
@@ -352,6 +363,13 @@ export function PayrollApp() {
   const [employeeDraft, setEmployeeDraft] = useState<EmployeeDraft | null>(null);
   const [expenseDraft, setExpenseDraft] = useState<ExpenseDraft | null>(null);
   const [monthDraft, setMonthDraft] = useState<MonthDraft | null>(null);
+  const [monthSourcePreview, setMonthSourcePreview] =
+    useState<PayrollData | null>(null);
+  const [monthSourceLoading, setMonthSourceLoading] = useState(false);
+  const [monthActionDraft, setMonthActionDraft] =
+    useState<MonthActionDraft | null>(null);
+  const [monthDeleteConfirmation, setMonthDeleteConfirmation] = useState("");
+  const [monthNotice, setMonthNotice] = useState("");
   const [oneTimeExpenseDraft, setOneTimeExpenseDraft] =
     useState<OneTimeExpenseDraft | null>(null);
   const [entityDraft, setEntityDraft] = useState<{
@@ -468,6 +486,9 @@ export function PayrollApp() {
       setEntityDraft(null);
       setImportRows(null);
       setMonthDraft(null);
+      setMonthSourcePreview(null);
+      setMonthActionDraft(null);
+      setMonthDeleteConfirmation("");
       setEmployeeSelectionMode(false);
       setSelectedSalaryIds(new Set());
       setExpenseSelectionMode(false);
@@ -506,8 +527,13 @@ export function PayrollApp() {
   const currentDepartment = data?.departments.find(
     (department) => department.id === selectedDepartment,
   );
+  const monthSourceData = monthDraft
+    ? monthDraft.sourceMonthId === data?.selectedMonth.id
+      ? data
+      : monthSourcePreview
+    : data;
   const copyableEmployeeCount =
-    data?.departments
+    monthSourceData?.departments
       .filter((department) =>
         shouldCopyDepartmentToNewMonth(department.id),
       )
@@ -516,11 +542,17 @@ export function PayrollApp() {
         0,
       ) ?? 0;
   const copyableSalaryTotal =
-    data?.departments
+    monthSourceData?.departments
       .filter((department) =>
         shouldCopyDepartmentToNewMonth(department.id),
       )
       .reduce((total, department) => total + department.total, 0) ?? 0;
+  const sourceRecurringExpenses =
+    monthSourceData?.expenses.filter((expense) => expense.isRecurring) ?? [];
+  const sourceRecurringExpenseTotal = sourceRecurringExpenses.reduce(
+    (total, expense) => total + expense.amount,
+    0,
+  );
   const filteredEmployees = useMemo(() => {
     if (!currentDepartment) return [];
     const query = search.trim().toLocaleLowerCase("kk-KZ");
@@ -680,15 +712,99 @@ export function PayrollApp() {
     });
   }
 
-  function openMonthDialog() {
+  async function loadMonthSourcePreview(sourceMonthId: string) {
     if (!data) return;
+    if (sourceMonthId === data.selectedMonth.id) {
+      setMonthSourcePreview(data);
+      return;
+    }
+
+    setMonthSourceLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/payroll?month=${encodeURIComponent(sourceMonthId)}`,
+        { cache: "no-store" },
+      );
+      if (response.status === 401) {
+        window.location.reload();
+        return;
+      }
+      const result = (await response.json()) as PayrollData & { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error ?? "Көшірілетін ай жүктелмеді.");
+      }
+      setMonthSourcePreview(result);
+    } catch (caught) {
+      setMonthSourcePreview(null);
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Көшірілетін ай жүктелмеді.",
+      );
+    } finally {
+      setMonthSourceLoading(false);
+    }
+  }
+
+  function openMonthDialog(sourceMonthId = data?.selectedMonth.id ?? "") {
+    if (!data) return;
+    const sourceId = data.months.some((item) => item.id === sourceMonthId)
+      ? sourceMonthId
+      : data.selectedMonth.id;
     setMonthDraft({
+      sourceMonthId: sourceId,
       targetMonthId: nextAvailableMonthId(
-        data.selectedMonth.id,
+        sourceId,
         data.months.map((item) => item.id),
       ),
       copyRecurringExpenses: true,
     });
+    setMonthSourcePreview(
+      sourceId === data.selectedMonth.id ? data : null,
+    );
+    void loadMonthSourcePreview(sourceId);
+  }
+
+  function changeMonthDraftSource(sourceMonthId: string) {
+    if (!data || !monthDraft) return;
+    setMonthDraft({
+      ...monthDraft,
+      sourceMonthId,
+      targetMonthId: nextAvailableMonthId(
+        sourceMonthId,
+        data.months.map((item) => item.id),
+      ),
+    });
+    setMonthSourcePreview(
+      sourceMonthId === data.selectedMonth.id ? data : null,
+    );
+    void loadMonthSourcePreview(sourceMonthId);
+  }
+
+  function openMonthAction(
+    type: MonthActionDraft["type"],
+    monthId: string,
+    label: string,
+  ) {
+    setMonthNotice("");
+    setMonthDeleteConfirmation("");
+    setMonthActionDraft({ type, monthId, label });
+  }
+
+  async function confirmMonthAction() {
+    if (!monthActionDraft) return;
+    const action = monthActionDraft;
+    const success = await mutate(
+      action.type === "reset" ? "resetMonthPayments" : "deleteMonth",
+      { targetMonthId: action.monthId },
+    );
+    if (!success) return;
+    setMonthNotice(
+      action.type === "reset"
+        ? `${action.label}: барлық төлем белгілері сброс жасалды.`
+        : `${action.label} есебі толық өшірілді.`,
+    );
   }
 
   function navigateMonth(direction: "older" | "newer") {
@@ -876,14 +992,9 @@ export function PayrollApp() {
     else groups.push({ year, months: [item] });
     return groups;
   }, []);
-  const recurringExpenses = data.expenses.filter((expense) => expense.isRecurring);
   const oneTimeExpenses = data.expenses.filter(isOneTimeOtherExpense);
   const operationalExpenses = data.expenses.filter(
     (expense) => !isOneTimeOtherExpense(expense),
-  );
-  const recurringExpenseTotal = recurringExpenses.reduce(
-    (sum, expense) => sum + expense.amount,
-    0,
   );
   const operationalExpenseTotal = operationalExpenses.reduce(
     (sum, expense) => sum + expense.amount,
@@ -904,10 +1015,6 @@ export function PayrollApp() {
     (total, department) => total + department.employees.length,
     0,
   );
-  const activePaymentMethodCount = data.paymentMethods.filter(
-    (method) => !method.archivedAt,
-  ).length;
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1045,7 +1152,7 @@ export function PayrollApp() {
                 <ChevronRight size={17} />
               </button>
             </div>
-            <button className="month-create-button" type="button" onClick={openMonthDialog}>
+            <button className="month-create-button" type="button" onClick={() => openMonthDialog()}>
               <span><Plus size={18} /></span>
               <span><b>Жаңа ай</b><small>Есепті көшіру</small></span>
             </button>
@@ -1541,11 +1648,14 @@ export function PayrollApp() {
               <div className="settings-overview-metrics">
                 <div><small>Қызметкерлер</small><strong>{settingsEmployeeCount}</strong></div>
                 <div><small>Белсенді бөлім</small><strong>{activeDepartments.length}</strong></div>
-                <div><small>Төлем түрі</small><strong>{activePaymentMethodCount}</strong></div>
+                <div><small>Есептік ай</small><strong>{data.months.length}</strong></div>
               </div>
             </section>
 
             <nav className="settings-tabs" aria-label="Баптаулар бөлімдері">
+              <button className={settingsSection === "months" ? "active" : ""} onClick={() => setSettingsSection("months")}>
+                <CalendarDays size={17} /><span><b>Айлар</b><small>Көшіру, сброс, өшіру</small></span>
+              </button>
               <button className={settingsSection === "employees" ? "active" : ""} onClick={() => setSettingsSection("employees")}>
                 <UsersRound size={17} /><span><b>Қызметкерлер</b><small>Қосу және импорт</small></span>
               </button>
@@ -1562,6 +1672,96 @@ export function PayrollApp() {
                 <CheckCircle2 size={17} /><span><b>Қауіпсіздік</b><small>Ортақ пароль</small></span>
               </button>
             </nav>
+
+            {settingsSection === "months" && (
+              <section className="panel settings-workspace month-management">
+                <div className="settings-workspace-heading">
+                  <div>
+                    <span className="eyebrow">Есептік кезеңдер</span>
+                    <h2>Айларды басқару</h2>
+                    <p>Кез келген айды негізге алып жаңа есеп құрыңыз, төлем белгілерін сброс жасаңыз немесе қажет емес айды толық өшіріңіз.</p>
+                  </div>
+                  <button className="primary-button" onClick={() => openMonthDialog()}>
+                    <Plus size={17} /> Жаңа ай құру
+                  </button>
+                </div>
+
+                {monthNotice && (
+                  <div className="settings-notice" role="status">
+                    <CheckCircle2 size={18} />
+                    <span>{monthNotice}</span>
+                    <button type="button" onClick={() => setMonthNotice("")} aria-label="Хабарламаны жабу">
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+
+                <div className="month-management-summary">
+                  <span className="month-management-summary-icon">
+                    <CalendarDays size={22} />
+                  </span>
+                  <div>
+                    <small>Қазір ашық есеп</small>
+                    <strong>{data.selectedMonth.label}</strong>
+                    <span>Барлығы {data.months.length} есептік ай сақталған</span>
+                  </div>
+                  <div className="month-management-summary-amount">
+                    <small>Жалпы жоспар</small>
+                    <strong>{formatMoney(data.stats.plannedTotal)}</strong>
+                  </div>
+                </div>
+
+                <div className="month-management-list">
+                  {data.months.map((item) => {
+                    const isCurrent = item.id === data.selectedMonth.id;
+                    return (
+                      <article
+                        className={`month-management-row ${isCurrent ? "active" : ""}`}
+                        key={item.id}
+                      >
+                        <span className="month-period-badge">
+                          <b>{String(item.month).padStart(2, "0")}</b>
+                          <small>{item.year}</small>
+                        </span>
+                        <div className="month-management-copy">
+                          <span>
+                            <strong>{item.label}</strong>
+                            {isCurrent && <em>Қазір ашық</em>}
+                          </span>
+                          <small>Айлықтар, компоненттер және осы кезеңнің шығындары</small>
+                        </div>
+                        <div className="month-management-actions">
+                          {!isCurrent && (
+                            <button className="month-action open" type="button" onClick={() => selectMonth(item.id)}>
+                              Айды ашу
+                            </button>
+                          )}
+                          <button className="month-action" type="button" onClick={() => openMonthDialog(item.id)}>
+                            <Copy size={15} /> Осы айдан көшіру
+                          </button>
+                          <button className="month-action" type="button" onClick={() => openMonthAction("reset", item.id, item.label)}>
+                            <RotateCcw size={15} /> Төлемдерді сброс
+                          </button>
+                          <button
+                            className="month-action danger"
+                            type="button"
+                            disabled={data.months.length === 1}
+                            onClick={() => openMonthAction("delete", item.id, item.label)}
+                          >
+                            <Trash2 size={15} /> Өшіру
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <div className="month-management-help">
+                  <TriangleAlert size={18} />
+                  <p><b>Маңызды:</b> «Сброс» тек төлем белгілерін алып тастайды. Айлықтар мен шығын сомалары сақталады. «Өшіру» таңдалған айдың барлық есептік деректерін қайтарымсыз жояды.</p>
+                </div>
+              </section>
+            )}
 
             {settingsSection === "employees" && (
               <section className="panel settings-workspace employee-management">
@@ -1737,11 +1937,33 @@ export function PayrollApp() {
               event.preventDefault();
               void mutate("createMonth", {
                 newMonthId: monthDraft.targetMonthId,
+                sourceMonthId: monthDraft.sourceMonthId,
                 copyRecurringExpenses: monthDraft.copyRecurringExpenses,
               });
             }}
           >
             <div className="month-setup">
+              <label className="month-source-picker">
+                <span>Негіз болатын ай</span>
+                <span className="month-source-control">
+                  <CalendarDays size={18} />
+                  <select
+                    aria-label="Негіз болатын ай"
+                    value={monthDraft.sourceMonthId}
+                    onChange={(event) =>
+                      changeMonthDraftSource(event.target.value)
+                    }
+                  >
+                    {data.months.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+                <small>Қызметкерлер мен айлық сомалары осы есептен көшіріледі</small>
+              </label>
               <label className="month-target">
                 <span>Құрылатын ай</span>
                 <input
@@ -1761,16 +1983,11 @@ export function PayrollApp() {
                   <small className="field-error">Бұл ай бұрыннан бар. Басқа айды таңдаңыз.</small>
                 )}
               </label>
-              <div className="month-source-card">
-                <span className="period-icon"><CalendarDays size={19} /></span>
-                <div><small>Көшірілетін есеп</small><strong>{data.selectedMonth.label}</strong></div>
-                <CheckCircle2 size={18} />
-              </div>
             </div>
-            <div className="copy-preview">
+            <div className={`copy-preview ${monthSourceLoading ? "loading" : ""}`}>
               <div><span><UsersRound size={18} /></span><div><small>Көшірілетін қызметкерлер</small><strong>{copyableEmployeeCount}</strong><em>Кураторлар мен Сату бөлімі — бос</em></div></div>
               <div><span><WalletCards size={18} /></span><div><small>Көшірілетін айлық қоры</small><strong>{formatMoney(copyableSalaryTotal)}</strong></div></div>
-              <div><span><ReceiptText size={18} /></span><div><small>Тұрақты шығындар</small><strong>{formatMoney(recurringExpenseTotal)}</strong><em>{recurringExpenses.length} жазба</em></div></div>
+              <div><span><ReceiptText size={18} /></span><div><small>Тұрақты шығындар</small><strong>{formatMoney(sourceRecurringExpenseTotal)}</strong><em>{sourceRecurringExpenses.length} жазба</em></div></div>
             </div>
             <label className="check-label copy-option">
               <input
@@ -1798,11 +2015,103 @@ export function PayrollApp() {
                 className="primary-button"
                 disabled={
                   saving ||
+                  monthSourceLoading ||
+                  !monthSourceData ||
+                  !monthDraft.sourceMonthId ||
                   !monthDraft.targetMonthId ||
                   data.months.some((item) => item.id === monthDraft.targetMonthId)
                 }
               >
                 {saving ? "Ай дайындалып жатыр…" : "Айды құрып, ашу"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {monthActionDraft && (
+        <Modal
+          title={
+            monthActionDraft.type === "reset"
+              ? "Төлем белгілерін сброс жасау"
+              : "Есептік айды толық өшіру"
+          }
+          subtitle="Айларды басқару"
+          onClose={() => {
+            if (saving) return;
+            setMonthActionDraft(null);
+            setMonthDeleteConfirmation("");
+          }}
+          wide
+        >
+          <form
+            className="modal-form month-action-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmMonthAction();
+            }}
+          >
+            <div className={`month-action-warning ${monthActionDraft.type}`}>
+              <span>
+                {monthActionDraft.type === "reset"
+                  ? <RotateCcw size={23} />
+                  : <TriangleAlert size={23} />}
+              </span>
+              <div>
+                <small>Таңдалған есептік кезең</small>
+                <strong>{monthActionDraft.label}</strong>
+                <p>
+                  {monthActionDraft.type === "reset"
+                    ? "Барлық қызметкер мен операциялық шығынның «Төленді» белгісі алынады. Аты-жөндер, айлықтар, компоненттер және шығын сомалары өзгермейді. Бір реттік жұмсалған ақша реестрі бұрынғыдай сақталады."
+                    : "Осы айдағы айлық snapshot-тары, компоненттер және барлық шығын жазбалары толық жойылады. Қызметкерлер анықтамалығы мен басқа айлардың есептері сақталады."}
+                </p>
+              </div>
+            </div>
+
+            {monthActionDraft.type === "delete" && (
+              <label className="month-delete-confirmation">
+                <span>Растау үшін <b>{monthActionDraft.monthId}</b> деп жазыңыз</span>
+                <input
+                  autoFocus
+                  value={monthDeleteConfirmation}
+                  onChange={(event) =>
+                    setMonthDeleteConfirmation(event.target.value.trim())
+                  }
+                  placeholder={monthActionDraft.monthId}
+                  autoComplete="off"
+                />
+              </label>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={saving}
+                onClick={() => {
+                  setMonthActionDraft(null);
+                  setMonthDeleteConfirmation("");
+                }}
+              >
+                Болдырмау
+              </button>
+              <button
+                className={
+                  monthActionDraft.type === "delete"
+                    ? "danger-confirm-button"
+                    : "primary-button"
+                }
+                disabled={
+                  saving ||
+                  (monthActionDraft.type === "delete" &&
+                    monthDeleteConfirmation !== monthActionDraft.monthId)
+                }
+              >
+                {saving
+                  ? "Орындалып жатыр…"
+                  : monthActionDraft.type === "reset"
+                    ? "Төлемдерді сброс жасау"
+                    : "Айды толық өшіру"}
               </button>
             </div>
           </form>

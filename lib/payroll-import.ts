@@ -34,6 +34,11 @@ const FULL_NAME_HEADERS = [
   "Name",
   "Фамилия имя",
   "Қызметкердің аты-жөні",
+  "Менеджер",
+  "Менеджерлер",
+  "Менеджеры",
+  "Команда",
+  "Список сотрудников",
 ];
 
 const SURNAME_HEADERS = ["Тегі", "Фамилия", "Last name"];
@@ -60,6 +65,7 @@ const BASE_HEADERS = [
 const TOTAL_HEADERS = [
   "Жалпы сома",
   "Жалпы айлық",
+  "Барлығы",
   "Айлық",
   "Сумма",
   "Итого",
@@ -114,11 +120,29 @@ const NON_MONEY_TOKENS = [
   "дни",
   "количество",
   "адам саны",
+  "оқушы саны",
+  "ученик",
   "балл",
   "процент",
   "пайыз",
   "ставка",
   "коэффициент",
+];
+const PERSON_COLUMN_TOKENS = [
+  "қызметкер",
+  "сотрудник",
+  "адам",
+  "аты жөні",
+  "фио",
+  "менеджер",
+  "куратор",
+  "мұғалім",
+  "мугалим",
+  "ұстаз",
+  "устаз",
+  "преподават",
+  "учител",
+  "команда",
 ];
 
 export const MONTH_IMPORT_HEADERS = [
@@ -210,30 +234,373 @@ function headerScore(row: unknown[]): number {
   return score;
 }
 
+type InferredGridColumns = {
+  nameIndex: number;
+  moneyIndex: number;
+  score: number;
+};
+
+function isLikelyPersonName(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const source = value.trim();
+  if (
+    source.length < 2 ||
+    source.length > 120 ||
+    !/\p{L}/u.test(source) ||
+    /[@=<>]/.test(source) ||
+    Number.isFinite(parseMoneyValue(source))
+  ) {
+    return false;
+  }
+  return source.split(/\s+/).length <= 8;
+}
+
+function inferGridColumns(
+  grid: unknown[][],
+  headerIndex: number,
+): InferredGridColumns | null {
+  const header = grid[headerIndex] ?? [];
+  if (
+    header.filter((cell) => String(cell ?? "").trim() !== "").length < 2
+  ) {
+    return null;
+  }
+
+  const samples = grid
+    .slice(headerIndex + 1, headerIndex + 41)
+    .filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""));
+  if (samples.length < 2) return null;
+
+  const width = Math.max(
+    header.length,
+    ...samples.map((row) => row.length),
+  );
+  let bestName = { index: -1, score: -1, count: 0 };
+  let bestMoney = { index: -1, score: -1, count: 0 };
+
+  for (let index = 0; index < width; index += 1) {
+    const label = String(header[index] ?? "");
+    const normalized = normalizedHeader(label);
+    const values = samples
+      .map((row) => row[index])
+      .filter((value) => String(value ?? "").trim() !== "");
+    const identifierColumn =
+      normalized === "n" ||
+      normalized === "no" ||
+      normalized === "id" ||
+      normalized === "№" ||
+      NON_MONEY_TOKENS.some((token) => normalized.includes(token));
+    const knownNonNameColumn = [
+      DEPARTMENT_HEADERS,
+      POSITION_HEADERS,
+      PAYMENT_HEADERS,
+      PAID_HEADERS,
+      BASE_HEADERS,
+      TOTAL_HEADERS,
+    ].some((aliases) => matchesHeader(label, aliases));
+
+    if (!identifierColumn && !knownNonNameColumn) {
+      const names = values.filter(isLikelyPersonName);
+      const uniqueNames = new Set(
+        names.map((value) =>
+          String(value).trim().toLocaleLowerCase("kk-KZ"),
+        ),
+      ).size;
+      const roleBonus = PERSON_COLUMN_TOKENS.some((token) =>
+        normalized.includes(token),
+      )
+        ? 12
+        : 0;
+      const score = names.length * 4 + uniqueNames * 2 + roleBonus;
+      if (names.length >= 2 && score > bestName.score) {
+        bestName = { index, score, count: names.length };
+      }
+    }
+
+    if (!identifierColumn) {
+      const amounts = values.filter((value) => {
+        const amount = parseMoneyValue(value);
+        return Number.isFinite(amount) && Math.abs(amount) >= 1_000;
+      });
+      const salaryHeaderBonus =
+        matchesHeader(label, BASE_HEADERS) ||
+        matchesHeader(label, TOTAL_HEADERS) ||
+        MONEY_TOKENS.some((token) => normalized.includes(token))
+          ? 12
+          : 0;
+      const score = amounts.length * 5 + salaryHeaderBonus;
+      if (amounts.length >= 2 && score > bestMoney.score) {
+        bestMoney = { index, score, count: amounts.length };
+      }
+    }
+  }
+
+  if (
+    bestName.index < 0 ||
+    bestMoney.index < 0 ||
+    bestName.index === bestMoney.index
+  ) {
+    return null;
+  }
+  return {
+    nameIndex: bestName.index,
+    moneyIndex: bestMoney.index,
+    score:
+      5 +
+      bestName.score +
+      bestMoney.score +
+      Math.min(bestName.count, bestMoney.count),
+  };
+}
+
+function compositeGridHeaders(
+  grid: unknown[][],
+  headerIndex: number,
+): string[] {
+  const childRow = grid[headerIndex] ?? [];
+  const parentRow = headerIndex > 0 ? grid[headerIndex - 1] ?? [] : [];
+  const width = Math.max(childRow.length, parentRow.length);
+  const parentGroups: string[] = [];
+  let currentGroup = "";
+
+  for (let index = 0; index < width; index += 1) {
+    const value = String(parentRow[index] ?? "").trim();
+    if (value) {
+      const normalized = normalizedHeader(value);
+      currentGroup =
+        /(апта|недел|week|ай|месяц|барлығы|итого|жалпы)/u.test(normalized)
+          ? value
+          : "";
+    }
+    parentGroups[index] = currentGroup;
+  }
+
+  return Array.from({ length: width }, (_, index) => {
+    const child = String(childRow[index] ?? "").trim();
+    const parent = parentGroups[index] ?? "";
+    const childIsIdentity =
+      [
+        FULL_NAME_HEADERS,
+        SURNAME_HEADERS,
+        FIRST_NAME_HEADERS,
+        PATRONYMIC_HEADERS,
+        DEPARTMENT_HEADERS,
+        POSITION_HEADERS,
+        PAYMENT_HEADERS,
+        PAID_HEADERS,
+      ].some((aliases) => matchesHeader(child, aliases)) ||
+      ["n", "no", "id", "№"].includes(normalizedHeader(child));
+
+    if (parent && !childIsIdentity) {
+      return child ? `${parent} ${child}` : parent;
+    }
+    return child;
+  });
+}
+
+function aggregateContinuationRows(
+  grid: unknown[][],
+  headerIndex: number,
+  headers: string[],
+  inferredColumns: InferredGridColumns | null,
+): unknown[][] {
+  const explicitNameIndex = headers.findIndex((header) =>
+    matchesHeader(header, FULL_NAME_HEADERS),
+  );
+  const nameIndex =
+    explicitNameIndex >= 0 ? explicitNameIndex : inferredColumns?.nameIndex ?? -1;
+  if (nameIndex < 0) return grid.slice(headerIndex + 1);
+
+  const identifierIndex = headers.findIndex((header) =>
+    ["n", "no", "id", "№"].includes(normalizedHeader(header)),
+  );
+  const amountIndexes = headers
+    .map((header, index) =>
+      matchesHeader(header, TOTAL_HEADERS) ||
+      matchesHeader(header, BASE_HEADERS)
+        ? index
+        : -1,
+    )
+    .filter((index) => index >= 0);
+  if (!amountIndexes.length && inferredColumns) {
+    amountIndexes.push(inferredColumns.moneyIndex);
+  }
+
+  type RowGroup = {
+    first: unknown[];
+    rows: unknown[][];
+    hasName: boolean;
+    hasIdentifier: boolean;
+  };
+  const groups: RowGroup[] = [];
+  let current: RowGroup | null = null;
+  const finishCurrent = (group: RowGroup | null) => {
+    if (group?.hasName) groups.push(group);
+  };
+  const startCurrent = (
+    row: unknown[],
+    hasName: boolean,
+    hasIdentifier: boolean,
+  ): RowGroup => {
+    return {
+      first: [...row],
+      rows: [row],
+      hasName,
+      hasIdentifier,
+    };
+  };
+  const appendCurrent = (
+    row: unknown[],
+    hasName: boolean,
+    hasIdentifier: boolean,
+  ): RowGroup => {
+    if (!current) {
+      return startCurrent(row, hasName, hasIdentifier);
+    }
+    current.rows.push(row);
+    current.hasName ||= hasName;
+    current.hasIdentifier ||= hasIdentifier;
+    for (let index = 0; index < row.length; index += 1) {
+      if (
+        String(current.first[index] ?? "").trim() === "" &&
+        String(row[index] ?? "").trim() !== ""
+      ) {
+        current.first[index] = row[index];
+      }
+    }
+    return current;
+  };
+
+  for (const row of grid.slice(headerIndex + 1)) {
+    const hasAnyValue = row.some(
+      (cell) => String(cell ?? "").trim() !== "",
+    );
+    if (!hasAnyValue) {
+      if (current) current.rows.push(row);
+      continue;
+    }
+
+    const name = String(row[nameIndex] ?? "").trim();
+    const hasIdentifier =
+      identifierIndex >= 0 &&
+      String(row[identifierIndex] ?? "").trim() !== "";
+    const nonEmptyCells = row.filter(
+      (cell) => String(cell ?? "").trim() !== "",
+    );
+    const isSummaryFooter =
+      !name &&
+      !hasIdentifier &&
+      nonEmptyCells.length > 0 &&
+      nonEmptyCells.every(
+        (cell) => !Number.isFinite(parseMoneyValue(cell)),
+      ) &&
+      nonEmptyCells.some((cell) =>
+        ["срзнач", "среднее", "average", "сумма", "итого", "барлығы"].includes(
+          normalizedHeader(String(cell)),
+        ),
+      );
+    if (isSummaryFooter) {
+      finishCurrent(current);
+      current = null;
+      break;
+    }
+
+    if (name && hasIdentifier) {
+      finishCurrent(current);
+      current = startCurrent(row, true, true);
+      continue;
+    }
+    if (hasIdentifier) {
+      if (current?.hasName && !current.hasIdentifier) {
+        current = appendCurrent(row, false, true);
+      } else {
+        finishCurrent(current);
+        current = startCurrent(row, false, true);
+      }
+      continue;
+    }
+    if (name) {
+      if (current?.hasIdentifier && !current.hasName) {
+        current = appendCurrent(row, true, false);
+      } else {
+        finishCurrent(current);
+        current = startCurrent(row, true, false);
+      }
+      continue;
+    }
+    if (current) current.rows.push(row);
+  }
+  finishCurrent(current);
+
+  return groups.map((group) => {
+    const combined = [...group.first];
+    for (const index of amountIndexes) {
+      let hasAmount = false;
+      let amount = 0;
+      for (const row of group.rows) {
+        const source = String(row[index] ?? "").trim();
+        const parsed = parseMoneyValue(row[index]);
+        if (source !== "" && Number.isFinite(parsed)) {
+          hasAmount = true;
+          amount += parsed;
+        }
+      }
+      if (hasAmount) combined[index] = amount;
+    }
+    return combined;
+  });
+}
+
 export function rowsFromGrid(grid: unknown[][]): Record<string, unknown>[] {
   let headerIndex = -1;
   let bestScore = -1;
+  let inferredColumns: InferredGridColumns | null = null;
   for (let index = 0; index < Math.min(grid.length, 30); index += 1) {
-    const score = headerScore(grid[index] ?? []);
+    const explicitScore = headerScore(grid[index] ?? []);
+    const inferred = inferGridColumns(grid, index);
+    const score = explicitScore >= 0 ? explicitScore + 1_000 : inferred?.score ?? -1;
     if (score > bestScore) {
       bestScore = score;
       headerIndex = index;
+      inferredColumns = inferred;
     }
   }
   if (headerIndex < 0) return [];
 
   const usedHeaders = new Map<string, number>();
-  const headers = (grid[headerIndex] ?? []).map((cell, index) => {
-    const label = String(cell ?? "").trim() || `Баған ${index + 1}`;
+  const compositeHeaders = compositeGridHeaders(grid, headerIndex);
+  const hasExplicitTotalHeader = compositeHeaders.some((header) =>
+    matchesHeader(header, TOTAL_HEADERS),
+  );
+  const headers = compositeHeaders.map((cell, index) => {
+    let label = cell || `Баған ${index + 1}`;
+    if (
+      inferredColumns?.nameIndex === index &&
+      !matchesHeader(label, FULL_NAME_HEADERS) &&
+      !matchesHeader(label, SURNAME_HEADERS) &&
+      !matchesHeader(label, FIRST_NAME_HEADERS)
+    ) {
+      label = "Қызметкер";
+    } else if (
+      !hasExplicitTotalHeader &&
+      inferredColumns?.moneyIndex === index &&
+      !matchesHeader(label, BASE_HEADERS) &&
+      !matchesHeader(label, TOTAL_HEADERS)
+    ) {
+      label = "Жалпы сома";
+    }
     const normalized = normalizedHeader(label);
     const occurrence = (usedHeaders.get(normalized) ?? 0) + 1;
     usedHeaders.set(normalized, occurrence);
     return occurrence === 1 ? label : `${label} (${occurrence})`;
   });
 
-  return grid
-    .slice(headerIndex + 1)
-    .filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""))
+  return aggregateContinuationRows(
+    grid,
+    headerIndex,
+    headers,
+    inferredColumns,
+  )
     .map((row) =>
       Object.fromEntries(
         headers.map((header, index) => [header, row[index] ?? ""]),

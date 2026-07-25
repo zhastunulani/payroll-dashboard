@@ -11,7 +11,7 @@
     "start": "next start -H 0.0.0.0",
     "build:worker": "node scripts/cloudflare-command.mjs build",
     "preview:worker": "npm run build:worker && node scripts/cloudflare-command.mjs preview",
-    "deploy:worker": "npm run build:worker && node scripts/cloudflare-command.mjs deploy",
+    "deploy:worker": "npm run build:worker && wrangler deploy --secrets-file .env.local",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "sync:worker-env": "node scripts/sync-cloudflare-dev-env.mjs",
     "postinstall": "patch-package",

@@ -227,8 +227,10 @@ Preview әдетте `http://127.0.0.1:8787` мекенжайында ашыла
 ```powershell
 npx wrangler login --use-keyring
 npx wrangler whoami
-npm run deploy:worker -- --secrets-file .env.local
+npm run deploy:worker
 ```
+
+Production URL: <https://payroll-dashboard.zhastunulani.workers.dev>
 
 `--secrets-file .env.local` үш міндетті құпияны Worker-ге шифрланған secret
 ретінде жүктейді:

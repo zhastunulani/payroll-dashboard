@@ -27,6 +27,12 @@ function text(value: unknown, label: string, max = 120): string {
   return result;
 }
 
+function optionalText(value: unknown, label: string, max = 600): string {
+  const result = String(value ?? "").trim();
+  if (result.length > max) throw new Error(`${label} тым ұзын.`);
+  return result;
+}
+
 function money(value: unknown, label: string): number {
   const result = Number(value);
   if (!Number.isFinite(result) || result < 0 || result > 2_000_000_000) {
@@ -444,6 +450,21 @@ export async function POST(request: Request) {
           OTHER_EXPENSE_CATEGORY_ID,
         )
         .run();
+    } else if (action === "saveEmployeeNote") {
+      const selectedMonth = monthId(body.monthId);
+      const snapshotId = text(body.id, "Айлық жазбасы");
+      const note = optionalText(body.note, "Пікір");
+      const result = await db
+        .prepare(
+          `UPDATE salary_snapshots
+           SET note = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND month_id = ?`,
+        )
+        .bind(note, snapshotId, selectedMonth)
+        .run();
+      if (!result.meta.changes) {
+        throw new Error("Қызметкердің айлық жазбасы табылмады.");
+      }
     } else if (action === "saveEmployee") {
       const selectedMonth = monthId(body.monthId);
       const employeeId = body.employeeId
@@ -454,6 +475,7 @@ export async function POST(request: Request) {
       const departmentId = text(body.departmentId, "Бөлім");
       const paymentMethodId = text(body.paymentMethodId, "Төлем түрі");
       const baseSalary = money(body.baseSalary, "Негізгі айлық");
+      const note = optionalText(body.note, "Пікір");
       const salaryComponents = components(body.components);
       const [department, method] = await Promise.all([
         db
@@ -526,7 +548,7 @@ export async function POST(request: Request) {
             .prepare(
               `UPDATE salary_snapshots
                SET employee_name = ?, position = ?, department_id = ?, department_name = ?,
-                   payment_method_id = ?, payment_method_name = ?, base_salary = ?,
+                   payment_method_id = ?, payment_method_name = ?, base_salary = ?, note = ?,
                    is_paid = CASE WHEN ? THEN 0 ELSE is_paid END,
                    paid_at = CASE WHEN ? THEN NULL ELSE paid_at END,
                    updated_at = CURRENT_TIMESTAMP
@@ -540,6 +562,7 @@ export async function POST(request: Request) {
               paymentMethodId,
               method.name,
               baseSalary,
+              note,
               salaryChanged ? 1 : 0,
               salaryChanged ? 1 : 0,
               snapshotId,
@@ -556,8 +579,8 @@ export async function POST(request: Request) {
             .prepare(
               `INSERT INTO salary_snapshots
                (id, month_id, employee_id, department_id, employee_name, position, department_name,
-                payment_method_id, payment_method_name, base_salary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                payment_method_id, payment_method_name, base_salary, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -570,6 +593,7 @@ export async function POST(request: Request) {
               paymentMethodId,
               method.name,
               baseSalary,
+              note,
             ),
         );
       }

@@ -17,6 +17,7 @@ export type SalaryRecord = {
   paymentMethodId: string;
   paymentMethodName: string;
   baseSalary: number;
+  note: string;
   components: SalaryComponent[];
   total: number;
   isPaid: boolean;

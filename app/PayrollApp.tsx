@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
   LayoutDashboard,
   LogOut,
+  MessageSquareText,
   Pencil,
   Plus,
   ReceiptText,
@@ -300,7 +301,14 @@ type EmployeeDraft = {
   departmentId: string;
   paymentMethodId: string;
   baseSalary: number;
+  note: string;
   components: SalaryComponent[];
+};
+
+type EmployeeNoteDraft = {
+  snapshotId: string;
+  employeeName: string;
+  note: string;
 };
 
 type ExpenseDraft = {
@@ -361,6 +369,8 @@ export function PayrollApp() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [employeeDraft, setEmployeeDraft] = useState<EmployeeDraft | null>(null);
+  const [employeeNoteDraft, setEmployeeNoteDraft] =
+    useState<EmployeeNoteDraft | null>(null);
   const [expenseDraft, setExpenseDraft] = useState<ExpenseDraft | null>(null);
   const [monthDraft, setMonthDraft] = useState<MonthDraft | null>(null);
   const [monthSourcePreview, setMonthSourcePreview] =
@@ -482,6 +492,7 @@ export function PayrollApp() {
       setData(result);
       setMonth(result.selectedMonth.id);
       setEmployeeDraft(null);
+      setEmployeeNoteDraft(null);
       setExpenseDraft(null);
       setEntityDraft(null);
       setImportRows(null);
@@ -696,6 +707,7 @@ export function PayrollApp() {
       paymentMethodId:
         data.paymentMethods.find((method) => !method.archivedAt)?.id ?? "",
       baseSalary: 0,
+      note: "",
       components: [],
     });
   }
@@ -708,7 +720,16 @@ export function PayrollApp() {
       departmentId: employee.departmentId,
       paymentMethodId: employee.paymentMethodId,
       baseSalary: employee.baseSalary,
+      note: employee.note,
       components: employee.components.map((component) => ({ ...component })),
+    });
+  }
+
+  function editEmployeeNote(employee: SalaryRecord) {
+    setEmployeeNoteDraft({
+      snapshotId: employee.id,
+      employeeName: employee.employeeName,
+      note: employee.note,
     });
   }
 
@@ -1387,7 +1408,7 @@ export function PayrollApp() {
                       <div className={`data-table employee-table ${employeeSelectionMode ? "selection-mode" : ""}`}>
                         <div className="table-head">
                           {employeeSelectionMode && <span />}
-                          <span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Жалпы сома</span><span>Төленді</span><span />
+                          <span>Қызметкер</span><span>Төлем түрі</span><span>Негізгі айлық</span><span>Қосымша</span><span>Пікір</span><span>Жалпы сома</span><span>Төленді</span><span />
                         </div>
                         {filteredEmployees.map((employee) => (
                           <div className={`table-row ${selectedSalaryIds.has(employee.id) ? "selected-row" : ""}`} key={employee.id}>
@@ -1407,6 +1428,16 @@ export function PayrollApp() {
                             <span className="component-cell">
                               {employee.components.length ? employee.components.map((component) => <small className={component.kind} key={component.id}>{component.kind === "deduction" ? "−" : "+"}{component.name}: {formatMoney(component.amount)}</small>) : <small>—</small>}
                             </span>
+                            <button
+                              type="button"
+                              className={`employee-note ${employee.note ? "has-note" : ""}`}
+                              onClick={() => editEmployeeNote(employee)}
+                              title={employee.note || "Пікір қосу"}
+                              aria-label={`${employee.employeeName}: ${employee.note ? "пікірді өзгерту" : "пікір қосу"}`}
+                            >
+                              <MessageSquareText size={15} />
+                              <span>{employee.note || "Пікір қосу"}</span>
+                            </button>
                             <strong className="money-cell total-cell">{formatMoney(employee.total)}</strong>
                             <span>
                               <button
@@ -2118,6 +2149,70 @@ export function PayrollApp() {
         </Modal>
       )}
 
+      {employeeNoteDraft && (
+        <Modal
+          title="Қызметкер пікірі"
+          subtitle={`${data.selectedMonth.label} · ${employeeNoteDraft.employeeName}`}
+          onClose={() => setEmployeeNoteDraft(null)}
+        >
+          <form
+            className="modal-form employee-note-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void mutate("saveEmployeeNote", {
+                id: employeeNoteDraft.snapshotId,
+                note: employeeNoteDraft.note,
+              });
+            }}
+          >
+            <p className="modal-note">
+              Бұл пікір тек {data.selectedMonth.label} есебінде сақталады және
+              төлем статусына әсер етпейді.
+            </p>
+            <label>
+              <span>Пікір немесе ескерту</span>
+              <textarea
+                autoFocus
+                maxLength={600}
+                rows={5}
+                value={employeeNoteDraft.note}
+                onChange={(event) =>
+                  setEmployeeNoteDraft({
+                    ...employeeNoteDraft,
+                    note: event.target.value,
+                  })
+                }
+                placeholder="Мысалы: 50% берілді"
+              />
+              <small>{employeeNoteDraft.note.length}/600 таңба</small>
+            </label>
+            <div className="modal-actions">
+              {employeeNoteDraft.note && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    setEmployeeNoteDraft({ ...employeeNoteDraft, note: "" })
+                  }
+                >
+                  Пікірді тазалау
+                </button>
+              )}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setEmployeeNoteDraft(null)}
+              >
+                Болдырмау
+              </button>
+              <button className="primary-button" disabled={saving}>
+                {saving ? "Сақталуда…" : "Сақтау"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {employeeDraft && (
         <Modal title={employeeDraft.employeeId ? "Қызметкерді өзгерту" : "Жаңа қызметкер"} subtitle={`${data.selectedMonth.label} айлық деректері`} onClose={() => setEmployeeDraft(null)} wide>
           <form className="modal-form" onSubmit={(event) => { event.preventDefault(); void mutate("saveEmployee", employeeDraft as unknown as Record<string, unknown>); }}>
@@ -2128,6 +2223,16 @@ export function PayrollApp() {
               <label><span>Бөлім</span><select required value={employeeDraft.departmentId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, departmentId: event.target.value })}>{data.departments.filter((department) => !department.archivedAt).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
               <label><span>Төлем түрі</span><select required value={employeeDraft.paymentMethodId} onChange={(event) => setEmployeeDraft({ ...employeeDraft, paymentMethodId: event.target.value })}>{data.paymentMethods.filter((method) => !method.archivedAt).map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
               <label className="span-two"><span>Негізгі айлық</span><MoneyInput ariaLabel="Негізгі айлық" value={employeeDraft.baseSalary} onChange={(baseSalary) => setEmployeeDraft({ ...employeeDraft, baseSalary })} /></label>
+              <label className="span-two">
+                <span>Пікір немесе ескерту</span>
+                <textarea
+                  maxLength={600}
+                  rows={3}
+                  value={employeeDraft.note}
+                  onChange={(event) => setEmployeeDraft({ ...employeeDraft, note: event.target.value })}
+                  placeholder="Мысалы: 50% берілді"
+                />
+              </label>
             </div>
             <div className="components-editor">
               <div className="components-title"><div><strong>Қосымша төлемдер мен ұсталымдар</strong><small>ПС немесе басқа компоненттерді қосыңыз</small></div><button type="button" className="small-add" onClick={() => setEmployeeDraft({ ...employeeDraft, components: [...employeeDraft.components, { id: crypto.randomUUID(), name: employeeDraft.departmentId === "dept-teachers" ? "ПС" : "", kind: "addition", amount: 0 }] })}><Plus size={16} /> Компонент</button></div>

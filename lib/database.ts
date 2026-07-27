@@ -48,10 +48,26 @@ async function initializeDatabase(): Promise<void> {
   const db = getRawDb();
   const existingSchema = await db
     .prepare(
-      "SELECT to_regclass('public.app_settings')::text AS table_name",
+      `SELECT to_regclass('public.app_settings')::text AS table_name,
+              EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'salary_snapshots'
+                  AND column_name = 'note'
+              ) AS has_salary_note`,
     )
-    .first<{ table_name: string | null }>();
-  if (existingSchema?.table_name) return;
+    .first<{ table_name: string | null; has_salary_note: boolean }>();
+  if (existingSchema?.table_name) {
+    if (!existingSchema.has_salary_note) {
+      await db
+        .prepare(
+          "ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''",
+        )
+        .run();
+    }
+    return;
+  }
 
   const statements = [
     `CREATE TABLE IF NOT EXISTS months (
@@ -101,6 +117,7 @@ async function initializeDatabase(): Promise<void> {
       payment_method_id TEXT NOT NULL,
       payment_method_name TEXT NOT NULL,
       base_salary INTEGER NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
       is_paid INTEGER NOT NULL DEFAULT 0,
       paid_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -274,6 +291,7 @@ type SalaryRow = {
   payment_method_id: string;
   payment_method_name: string;
   base_salary: number;
+  note: string;
   is_paid: number;
   paid_at: string | null;
   archived_at: string | null;
@@ -290,7 +308,7 @@ type ComponentRow = {
 async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
   const rows = await queryAll<SalaryRow>(
     `SELECT s.id, s.employee_id, s.employee_name, s.position, s.department_id, s.department_name,
-            s.payment_method_id, s.payment_method_name, s.base_salary, s.is_paid,
+            s.payment_method_id, s.payment_method_name, s.base_salary, s.note, s.is_paid,
             s.paid_at, e.archived_at
      FROM salary_snapshots s
      JOIN employees e ON e.id = s.employee_id
@@ -330,6 +348,7 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
       paymentMethodId: row.payment_method_id,
       paymentMethodName: row.payment_method_name,
       baseSalary: row.base_salary,
+      note: row.note,
       components: salaryComponents,
       total: salaryTotal(row.base_salary, salaryComponents),
       isPaid: Boolean(row.is_paid),

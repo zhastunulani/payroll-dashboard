@@ -142,7 +142,7 @@ input, select { color: var(--ink); }
   font-size: 11px;
   font-weight: 750;
 }
-.login-card input, .modal-form input, .modal-form select {
+.login-card input, .modal-form input, .modal-form select, .modal-form textarea {
   width: 100%;
   height: 46px;
   padding: 0 13px;
@@ -150,9 +150,17 @@ input, select { color: var(--ink); }
   border-radius: 10px;
   outline: none;
   background: white;
+  font-family: inherit;
   font-size: 13px;
 }
-.login-card input:focus, .modal-form input:focus, .modal-form select:focus {
+.modal-form textarea {
+  min-height: 92px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.login-card input:focus, .modal-form input:focus, .modal-form select:focus, .modal-form textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(73, 92, 248, .1);
 }
@@ -682,8 +690,8 @@ input, select { color: var(--ink); }
   align-items: center;
   gap: 14px;
 }
-.employee-table .table-head, .employee-table .table-row { min-width: 1080px; grid-template-columns: minmax(255px, 1.35fr) 125px 125px minmax(150px, .95fr) 145px 88px 66px; }
-.employee-table.selection-mode .table-head, .employee-table.selection-mode .table-row { min-width: 1120px; grid-template-columns: 28px minmax(235px, 1.35fr) 125px 125px minmax(150px, .95fr) 145px 88px 66px; }
+.employee-table .table-head, .employee-table .table-row { min-width: 1290px; grid-template-columns: minmax(235px, 1.25fr) 115px 120px minmax(145px, .85fr) minmax(190px, 1fr) 140px 82px 66px; }
+.employee-table.selection-mode .table-head, .employee-table.selection-mode .table-row { min-width: 1335px; grid-template-columns: 28px minmax(220px, 1.2fr) 115px 120px minmax(145px, .85fr) minmax(190px, 1fr) 140px 82px 66px; }
 .expense-table .table-head, .expense-table .table-row { min-width: 820px; grid-template-columns: minmax(190px, 1.5fr) 145px 110px 130px 88px 66px; }
 .expense-table.selection-mode .table-head, .expense-table.selection-mode .table-row { min-width: 870px; grid-template-columns: 28px minmax(190px, 1.5fr) 145px 110px 130px 88px 66px; }
 .table-head { height: 42px; color: #778097; background: #fafbfc; font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: .045em; }
@@ -705,6 +713,42 @@ input, select { color: var(--ink); }
 .component-cell small { color: var(--soft); font-size: 9px; line-height: 1.35; }
 .component-cell .addition { color: var(--success); }
 .component-cell .deduction { color: var(--danger); }
+.employee-note {
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px dashed #d8ddea;
+  border-radius: 9px;
+  color: var(--muted);
+  background: #fcfcfe;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  text-align: left;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.employee-note svg { margin-top: 1px; color: #9aa3b8; }
+.employee-note span {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.employee-note:hover {
+  color: var(--primary);
+  border-color: #cbd0ff;
+  background: var(--primary-soft);
+}
+.employee-note.has-note {
+  color: #46547d;
+  border-style: solid;
+  border-color: #dfe3ff;
+  background: #f7f8ff;
+  font-weight: 650;
+}
+.employee-note.has-note svg { color: var(--primary); }
 .paid-toggle {
   padding: 0;
   border: 0;
@@ -1389,6 +1433,7 @@ input, select { color: var(--ink); }
 .amount-input input { padding-right: 38px; font-variant-numeric: tabular-nums; }
 .amount-input b { position: absolute; right: 13px; top: 15px; color: var(--primary); font-size: 12px; }
 .modal-note { margin: 0; padding: 12px 13px; border-radius: 9px; color: #4f5e9a; background: var(--primary-soft); font-size: 10px; line-height: 1.55; }
+.employee-note-form label small { color: var(--muted); text-align: right; font-size: 9px; }
 .modal-actions { padding-top: 5px; display: flex; justify-content: flex-end; gap: 8px; }
 .components-editor { padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: #fbfbfd; }
 .components-title { margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }

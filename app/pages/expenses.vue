@@ -48,7 +48,7 @@ async function remove(expense: ExpenseRecord) { if (confirm(`${expense.name} ш�
           <div data-label="Категория"><span class="tag">{{ expense.categoryName }}</span></div>
           <div data-label="Қайталану"><span :class="expense.isRecurring ? 'recurring-tag' : 'once-tag'">{{ expense.isRecurring ? "Ай сайын" : "Бір рет" }}</span></div>
           <div data-label="Сома" class="money total">{{ formatMoney(expense.amount) }}</div>
-          <button type="button" data-label="Төлем статусы" class="status-toggle" :class="{ paid: expense.isPaid }" @click="payroll.mutate('toggleExpensePaid', { id: expense.id, isPaid: !expense.isPaid })"><i><Check v-if="expense.isPaid" :size="13" /></i>{{ expense.isPaid ? "Төленді" : "Төленбеді" }}</button>
+          <button type="button" data-label="Төлем статусы" class="status-toggle" :class="{ paid: expense.isPaid }" :disabled="payroll.isPending('toggleExpensePaid', expense.id)" @click="payroll.mutate('toggleExpensePaid', { id: expense.id, isPaid: !expense.isPaid })"><i><Check v-if="expense.isPaid" :size="13" /></i>{{ expense.isPaid ? "Төленді" : "Төленбеді" }}</button>
           <div class="row-actions"><button type="button" aria-label="Өзгерту" @click="openForm(expense)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="Өшіру" @click="remove(expense)"><Trash2 :size="16" /></button></div>
         </div>
       </div>

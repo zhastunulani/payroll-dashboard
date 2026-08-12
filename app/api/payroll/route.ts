@@ -424,6 +424,13 @@ export async function POST(request: Request) {
           selectedMonth,
         )
         .run();
+      return Response.json({
+        ok: true,
+        compact: true,
+        action,
+        id,
+        isPaid: paid,
+      });
     } else if (action === "setSalaryPaidBulk") {
       const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const salaryIds = idList(body.ids, "Айлық");
@@ -475,6 +482,13 @@ export async function POST(request: Request) {
           selectedMonth,
         )
         .run();
+      return Response.json({
+        ok: true,
+        compact: true,
+        action,
+        id,
+        isPaid: paid,
+      });
     } else if (action === "setExpensePaidBulk") {
       const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const otherCategoryId = await resolveOtherCategoryId(workspaceId);
@@ -528,6 +542,13 @@ export async function POST(request: Request) {
       if (!result.meta.changes) {
         throw new Error("Қызметкердің айлық жазбасы табылмады.");
       }
+      return Response.json({
+        ok: true,
+        compact: true,
+        action,
+        id: snapshotId,
+        note,
+      });
     } else if (action === "saveEmployee") {
       const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const employeeId = body.employeeId

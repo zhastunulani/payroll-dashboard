@@ -95,7 +95,7 @@ async function remove(employee: SalaryRecord) {
           <div data-label="Қосымша" class="components"><small v-for="component in employee.components" :key="component.id" :class="component.kind">{{ component.kind === "deduction" ? "−" : "+" }}{{ component.name }}: {{ formatMoney(component.amount) }}</small><small v-if="!employee.components.length">—</small></div>
           <button type="button" data-label="Пікір" class="note-button" :class="{ filled: employee.note }" @click="openNote(employee)"><MessageSquareText :size="15" /><span>{{ employee.note || "Пікір қосу" }}</span></button>
           <div data-label="Жалпы сома" class="money total">{{ formatMoney(employee.total) }}</div>
-          <button type="button" data-label="Төлем статусы" class="status-toggle" :class="{ paid: employee.isPaid }" :disabled="payroll.saving.value" @click="payroll.mutate('toggleSalaryPaid', { id: employee.id, isPaid: !employee.isPaid })"><i><Check v-if="employee.isPaid" :size="13" /></i>{{ employee.isPaid ? "Төленді" : "Төленбеді" }}</button>
+          <button type="button" data-label="Төлем статусы" class="status-toggle" :class="{ paid: employee.isPaid }" :disabled="payroll.isPending('toggleSalaryPaid', employee.id)" @click="payroll.mutate('toggleSalaryPaid', { id: employee.id, isPaid: !employee.isPaid })"><i><Check v-if="employee.isPaid" :size="13" /></i>{{ employee.isPaid ? "Төленді" : "Төленбеді" }}</button>
           <div class="row-actions"><button type="button" aria-label="Өзгерту" @click="openEdit(employee)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="Өшіру" @click="remove(employee)"><Trash2 :size="16" /></button></div>
         </div>
       </div>
@@ -105,6 +105,6 @@ async function remove(employee: SalaryRecord) {
 
   <EmployeeForm v-if="editOpen" :employee="editEmployee" @close="editOpen = false" @saved="editOpen = false" />
   <UiModal v-if="noteEmployee" title="Қызметкер пікірі" :description="noteEmployee.employeeName" @close="noteEmployee = null">
-    <form class="form-stack" @submit.prevent="saveNote"><label class="form-field"><span>Пікір немесе ескерту</span><textarea v-model="note" maxlength="600" rows="5" placeholder="Мысалы: 50% берілді" /></label><div class="modal-actions"><button type="button" class="button ghost" @click="noteEmployee = null">Болдырмау</button><button class="button primary">Сақтау</button></div></form>
+    <form class="form-stack" @submit.prevent="saveNote"><label class="form-field"><span>Пікір немесе ескерту</span><textarea v-model="note" maxlength="600" rows="5" placeholder="Мысалы: 50% берілді" /></label><div class="modal-actions"><button type="button" class="button ghost" @click="noteEmployee = null">Болдырмау</button><button class="button primary" :disabled="payroll.isPending('saveEmployeeNote', noteEmployee.id)">{{ payroll.isPending('saveEmployeeNote', noteEmployee.id) ? "Сақталуда…" : "Сақтау" }}</button></div></form>
   </UiModal>
 </template>

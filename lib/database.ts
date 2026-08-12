@@ -7,7 +7,6 @@ import { PostgresDatabase } from "./postgres-database";
 import type {
   ExpenseRecord,
   PayrollData,
-  SalaryComponent,
   SalaryRecord,
 } from "./types";
 
@@ -25,6 +24,12 @@ export function workspaceInitials(name: string): string {
 
 let initialization: Promise<void> | null = null;
 let database: PostgresDatabase | null = null;
+const settingCache = new Map<
+  string,
+  { value: string | null; expiresAt: number }
+>();
+const SETTING_CACHE_MS = 30_000;
+let settingsLoading: Promise<void> | null = null;
 
 export function runtimeEnv(): RuntimeEnv {
   return {
@@ -55,15 +60,42 @@ async function initializeDatabase(): Promise<void> {
   const existingSchema = await db
     .prepare(
       `SELECT to_regclass('public.app_settings')::text AS table_name,
+              to_regclass('public.workspaces')::text AS workspaces_table,
               EXISTS (
                 SELECT 1
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'salary_snapshots'
                   AND column_name = 'note'
-              ) AS has_salary_note`,
+              ) AS has_salary_note,
+              (
+                SELECT COUNT(*) = 7
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name IN (
+                    'months', 'departments', 'payment_methods', 'employees',
+                    'salary_snapshots', 'expense_categories', 'expenses'
+                  )
+                  AND column_name = 'workspace_id'
+              ) AS has_workspace_scope`,
     )
-    .first<{ table_name: string | null; has_salary_note: boolean }>();
+    .first<{
+      table_name: string | null;
+      workspaces_table: string | null;
+      has_salary_note: boolean;
+      has_workspace_scope: boolean;
+    }>();
+  // Schema migrations are only required for a new or outdated database. The
+  // old path executed every CREATE/ALTER/seed batch whenever Workers created a
+  // fresh isolate, adding several remote database round trips to normal API
+  // requests and even to login.
+  if (
+    existingSchema?.table_name &&
+    existingSchema.workspaces_table &&
+    existingSchema.has_salary_note &&
+    existingSchema.has_workspace_scope
+  ) return;
+
   if (existingSchema?.table_name && !existingSchema.has_salary_note) {
       await db
         .prepare(
@@ -282,11 +314,26 @@ async function initializeDatabase(): Promise<void> {
 
 export async function getSetting(key: string): Promise<string | null> {
   await ensureDatabase();
-  const row = await getRawDb()
-    .prepare("SELECT value FROM app_settings WHERE key = ?")
-    .bind(key)
-    .first<{ value: string }>();
-  return row?.value ?? null;
+  const cached = settingCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  settingsLoading ??= (async () => {
+    const rows = await queryAll<{ key: string; value: string }>(
+      "SELECT key, value FROM app_settings WHERE key IN (?, ?)",
+      "password_hash",
+      "session_version",
+    );
+    const expiresAt = Date.now() + SETTING_CACHE_MS;
+    for (const settingKey of ["password_hash", "session_version"]) {
+      settingCache.set(settingKey, { value: null, expiresAt });
+    }
+    for (const row of rows) {
+      settingCache.set(row.key, { value: row.value, expiresAt });
+    }
+  })().finally(() => {
+    settingsLoading = null;
+  });
+  await settingsLoading;
+  return settingCache.get(key)?.value ?? null;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
@@ -299,6 +346,7 @@ export async function setSetting(key: string, value: string): Promise<void> {
     )
     .bind(key, value)
     .run();
+  settingCache.set(key, { value, expiresAt: Date.now() + SETTING_CACHE_MS });
 }
 
 async function queryAll<T>(statement: string, ...values: unknown[]): Promise<T[]> {
@@ -322,48 +370,30 @@ type SalaryRow = {
   archived_at: string | null;
 };
 
-type ComponentRow = {
-  id: string;
-  salary_snapshot_id: string;
-  name: string;
-  kind: "addition" | "deduction";
-  amount: number;
-};
-
 async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
-  const rows = await queryAll<SalaryRow>(
+  const rows = await queryAll<SalaryRow & {
+    component_id: string | null;
+    component_name: string | null;
+    component_kind: "addition" | "deduction" | null;
+    component_amount: number | null;
+  }>(
     `SELECT s.id, s.employee_id, s.employee_name, s.position, s.department_id, s.department_name,
-            s.payment_method_id, s.payment_method_name, s.base_salary, s.note, s.is_paid,
-            s.paid_at, e.archived_at
-     FROM salary_snapshots s
-     JOIN employees e ON e.id = s.employee_id
-     WHERE s.month_id = ? AND e.archived_at IS NULL
-     ORDER BY s.department_name, s.employee_name`,
+             s.payment_method_id, s.payment_method_name, s.base_salary, s.note, s.is_paid,
+             s.paid_at, e.archived_at,
+             c.id AS component_id, c.name AS component_name,
+             c.kind AS component_kind, c.amount AS component_amount
+      FROM salary_snapshots s
+      JOIN employees e ON e.id = s.employee_id
+      LEFT JOIN salary_components c ON c.salary_snapshot_id = s.id
+      WHERE s.month_id = ? AND e.archived_at IS NULL
+      ORDER BY s.department_name, s.employee_name, c.created_at, c.id`,
     monthId,
   );
-  const components = await queryAll<ComponentRow>(
-    `SELECT c.id, c.salary_snapshot_id, c.name, c.kind, c.amount
-     FROM salary_components c
-     JOIN salary_snapshots s ON s.id = c.salary_snapshot_id
-     JOIN employees e ON e.id = s.employee_id
-     WHERE s.month_id = ? AND e.archived_at IS NULL
-     ORDER BY c.created_at, c.id`,
-    monthId,
-  );
-  const bySnapshot = new Map<string, SalaryComponent[]>();
-  for (const component of components) {
-    const list = bySnapshot.get(component.salary_snapshot_id) ?? [];
-    list.push({
-      id: component.id,
-      name: component.name,
-      kind: component.kind,
-      amount: component.amount,
-    });
-    bySnapshot.set(component.salary_snapshot_id, list);
-  }
-  return rows.map((row) => {
-    const salaryComponents = bySnapshot.get(row.id) ?? [];
-    return {
+  const salaries = new Map<string, SalaryRecord>();
+  for (const row of rows) {
+    let salary = salaries.get(row.id);
+    if (!salary) {
+      salary = {
       id: row.id,
       employeeId: row.employee_id,
       employeeName: row.employee_name,
@@ -374,13 +404,30 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
       paymentMethodName: row.payment_method_name,
       baseSalary: row.base_salary,
       note: row.note,
-      components: salaryComponents,
-      total: salaryTotal(row.base_salary, salaryComponents),
+      components: [],
+      total: row.base_salary,
       isPaid: Boolean(row.is_paid),
       paidAt: row.paid_at,
       archivedAt: row.archived_at,
-    };
-  });
+      };
+      salaries.set(row.id, salary);
+    }
+    if (
+      row.component_id && row.component_name && row.component_kind &&
+      row.component_amount !== null
+    ) {
+      salary.components.push({
+        id: row.component_id,
+        name: row.component_name,
+        kind: row.component_kind,
+        amount: row.component_amount,
+      });
+    }
+  }
+  return [...salaries.values()].map((salary) => ({
+    ...salary,
+    total: salaryTotal(salary.baseSalary, salary.components),
+  }));
 }
 
 async function loadExpenses(monthId: string): Promise<ExpenseRecord[]> {
@@ -450,16 +497,26 @@ export async function loadPayrollData(
   requestedWorkspaceId?: string,
 ): Promise<PayrollData> {
   await ensureDatabase();
-  const workspaceRows = await queryAll<{ id: string; name: string; sort_order: number }>(
-    "SELECT id, name, sort_order FROM workspaces ORDER BY sort_order, created_at",
-  );
+  const [workspaceRows, requestedMonthRows] = await Promise.all([
+    queryAll<{ id: string; name: string; sort_order: number }>(
+      "SELECT id, name, sort_order FROM workspaces ORDER BY sort_order, created_at",
+    ),
+    requestedWorkspaceId
+      ? queryAll<{ id: string; year: number; month: number }>(
+          "SELECT id, year, month FROM months WHERE workspace_id = ? ORDER BY year DESC, month DESC",
+          requestedWorkspaceId,
+        )
+      : Promise.resolve(null),
+  ]);
   const selectedWorkspace = workspaceRows.find((item) => item.id === requestedWorkspaceId)
     ?? workspaceRows[0];
   if (!selectedWorkspace) throw new Error("Жоба табылмады.");
-  const monthRows = await queryAll<{ id: string; year: number; month: number }>(
-    "SELECT id, year, month FROM months WHERE workspace_id = ? ORDER BY year DESC, month DESC",
-    selectedWorkspace.id,
-  );
+  const monthRows = requestedWorkspaceId === selectedWorkspace.id && requestedMonthRows
+    ? requestedMonthRows
+    : await queryAll<{ id: string; year: number; month: number }>(
+        "SELECT id, year, month FROM months WHERE workspace_id = ? ORDER BY year DESC, month DESC",
+        selectedWorkspace.id,
+      );
   const selectedIndex = Math.max(
     0,
     monthRows.findIndex((month) => `${month.year}-${String(month.month).padStart(2, "0")}` === requestedMonthId),

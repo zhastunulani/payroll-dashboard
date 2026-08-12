@@ -84,9 +84,19 @@ export function buildBreakdown(
 }
 
 export function monthLabel(year: number, month: number): string {
-  return new Intl.DateTimeFormat("kk-KZ", {
-    year: "numeric",
-    month: "long",
-    timeZone: "Asia/Oral",
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
+  const monthNames = [
+    "қаңтар",
+    "ақпан",
+    "наурыз",
+    "сәуір",
+    "мамыр",
+    "маусым",
+    "шілде",
+    "тамыз",
+    "қыркүйек",
+    "қазан",
+    "қараша",
+    "желтоқсан",
+  ];
+  return `${year} ж. ${monthNames[month - 1] ?? String(month).padStart(2, "0")}`;
 }

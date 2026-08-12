@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBreakdown, computeStats, salaryTotal } from "../lib/calculations.ts";
+import { buildBreakdown, computeStats, monthLabel, salaryTotal } from "../lib/calculations.ts";
 import type { ExpenseRecord, SalaryRecord } from "../lib/types.ts";
 
 test("salary total combines base, additions and deductions", () => {
@@ -126,4 +126,10 @@ test("breakdown compares current and previous month", () => {
       changePercent: -100,
     },
   ]);
+});
+
+test("month labels use stable Kazakh names in every runtime", () => {
+  assert.equal(monthLabel(2026, 8), "2026 ж. тамыз");
+  assert.equal(monthLabel(2026, 7), "2026 ж. шілде");
+  assert.equal(monthLabel(2026, 3), "2026 ж. наурыз");
 });

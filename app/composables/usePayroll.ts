@@ -1,7 +1,11 @@
 import type { PayrollData } from "../../lib/types";
 import { computeStats } from "../../lib/calculations";
 
-type ApiError = Error & { statusCode?: number; status?: number };
+type ApiError = Error & {
+  statusCode?: number;
+  status?: number;
+  data?: { error?: string };
+};
 type CompactMutationResult = { ok: true; compact: true; signedOut?: boolean };
 
 const optimisticActions = new Set([
@@ -81,35 +85,54 @@ export function usePayroll() {
   const loading = useState("payroll:loading", () => false);
   const saving = useState("payroll:saving", () => false);
   const pendingMutations = useState<string[]>("payroll:pending-mutations", () => []);
+  const loadSequence = useState("payroll:load-sequence", () => 0);
   const error = useState("payroll:error", () => "");
   const workspaceId = useState("payroll:workspace", () => "");
 
   async function load(monthId?: string, nextWorkspaceId?: string) {
+    const requestId = ++loadSequence.value;
     loading.value = true;
     error.value = "";
     try {
       const activeWorkspace = nextWorkspaceId ?? workspaceId.value;
-      data.value = await $fetch<PayrollData>("/api/payroll", {
-        query: {
-          ...(monthId ? { month: monthId } : {}),
-          ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-        },
-        credentials: "include",
-      });
+      let result: PayrollData | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          result = await $fetch<PayrollData>("/api/payroll", {
+            query: {
+              ...(monthId ? { month: monthId } : {}),
+              ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+            },
+            credentials: "include",
+          });
+          break;
+        } catch (caught) {
+          const apiError = caught as ApiError;
+          const status = apiError.statusCode ?? apiError.status;
+          const retryable = status === undefined || status >= 500;
+          if (!retryable || attempt === 2) throw caught;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+          if (requestId !== loadSequence.value) return;
+        }
+      }
+      if (!result || requestId !== loadSequence.value) return;
+      data.value = result;
       authenticated.value = true;
-      workspaceId.value = data.value.selectedWorkspace.id;
+      workspaceId.value = result.selectedWorkspace.id;
       if (import.meta.client) localStorage.setItem("payroll-workspace", workspaceId.value);
     } catch (caught) {
+      if (requestId !== loadSequence.value) return;
       const apiError = caught as ApiError;
       if (apiError.statusCode === 401 || apiError.status === 401) {
         authenticated.value = false;
         data.value = null;
       } else {
         authenticated.value = true;
-        error.value = apiError.message || "Деректер жүктелмеді.";
+        error.value = apiError.data?.error
+          || "Деректерді жүктеу уақытша мүмкін болмады. Қайта көріңіз.";
       }
     } finally {
-      loading.value = false;
+      if (requestId === loadSequence.value) loading.value = false;
     }
   }
 

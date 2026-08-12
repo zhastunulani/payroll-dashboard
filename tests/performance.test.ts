@@ -27,3 +27,10 @@ test("frequent row actions use compact responses and optimistic updates", () => 
   assert.match(composable, /applyOptimisticMutation\(data\.value, action, payload\)/);
   assert.match(composable, /if \(!\("compact" in result\)\)/);
 });
+
+test("month loading retries transient failures and ignores stale responses", () => {
+  assert.match(composable, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)/);
+  assert.match(composable, /const retryable = status === undefined \|\| status >= 500/);
+  assert.match(composable, /requestId !== loadSequence\.value/);
+  assert.match(composable, /Деректерді жүктеу уақытша мүмкін болмады/);
+});

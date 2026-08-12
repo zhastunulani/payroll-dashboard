@@ -17,6 +17,12 @@ type RuntimeEnv = {
   SESSION_SECRET?: string;
 };
 
+export const MAIN_WORKSPACE_ID = "workspace-main";
+
+export function workspaceInitials(name: string): string {
+  return name.trim().slice(0, 1).toLocaleUpperCase("kk-KZ") || "Ж";
+}
+
 let initialization: Promise<void> | null = null;
 let database: PostgresDatabase | null = null;
 
@@ -58,18 +64,22 @@ async function initializeDatabase(): Promise<void> {
               ) AS has_salary_note`,
     )
     .first<{ table_name: string | null; has_salary_note: boolean }>();
-  if (existingSchema?.table_name) {
-    if (!existingSchema.has_salary_note) {
+  if (existingSchema?.table_name && !existingSchema.has_salary_note) {
       await db
         .prepare(
           "ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''",
         )
         .run();
-    }
-    return;
   }
 
   const statements = [
+    `CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
     `CREATE TABLE IF NOT EXISTS months (
       id TEXT PRIMARY KEY,
       year INTEGER NOT NULL,
@@ -78,7 +88,6 @@ async function initializeDatabase(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS months_year_month_idx ON months(year, month)`,
     `CREATE TABLE IF NOT EXISTS departments (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -165,20 +174,36 @@ async function initializeDatabase(): Promise<void> {
   ];
   await db.batch(statements.map((statement) => db.prepare(statement)));
 
+  await db.batch([
+    "months", "departments", "payment_methods", "employees",
+    "salary_snapshots", "expense_categories", "expenses",
+  ].map((table) => db.prepare(
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT '${MAIN_WORKSPACE_ID}'`,
+  )));
+  await db.batch([
+    db.prepare("DROP INDEX IF EXISTS months_year_month_idx"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS months_workspace_period_idx ON months(workspace_id, year, month)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS salary_workspace_month_idx ON salary_snapshots(workspace_id, month_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS expenses_workspace_month_idx ON expenses(workspace_id, month_id)"),
+  ]);
+
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;
   const monthId = `${year}-${String(month).padStart(2, "0")}`;
 
   const seedStatements = [
+    db.prepare(
+      "INSERT OR IGNORE INTO workspaces (id, name, sort_order) VALUES (?, ?, 1)",
+    ).bind(MAIN_WORKSPACE_ID, "EdUser"),
     db
       .prepare(
-        `INSERT INTO months (id, year, month)
-         SELECT ?, ?, ?
-         WHERE NOT EXISTS (SELECT 1 FROM months)
+        `INSERT INTO months (id, year, month, workspace_id)
+         SELECT ?, ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM months WHERE workspace_id = ?)
          ON CONFLICT DO NOTHING`,
       )
-      .bind(monthId, year, month),
+      .bind(monthId, year, month, MAIN_WORKSPACE_ID, MAIN_WORKSPACE_ID),
     ...[
       ["dept-academ", "Академ", 1],
       ["dept-teachers", "Мұғалімдер", 2],
@@ -382,6 +407,9 @@ async function loadExpenses(monthId: string): Promise<ExpenseRecord[]> {
     isRecurring: Boolean(row.is_recurring),
     isPaid: Boolean(row.is_paid),
     paidAt: row.paid_at,
+    isOneTime:
+      row.category_name === OTHER_EXPENSE_CATEGORY_NAME &&
+      !row.is_recurring,
   }));
 }
 
@@ -417,14 +445,24 @@ function groupedExpenses(
   return [...map.values()];
 }
 
-export async function loadPayrollData(requestedMonthId?: string): Promise<PayrollData> {
+export async function loadPayrollData(
+  requestedMonthId?: string,
+  requestedWorkspaceId?: string,
+): Promise<PayrollData> {
   await ensureDatabase();
+  const workspaceRows = await queryAll<{ id: string; name: string; sort_order: number }>(
+    "SELECT id, name, sort_order FROM workspaces ORDER BY sort_order, created_at",
+  );
+  const selectedWorkspace = workspaceRows.find((item) => item.id === requestedWorkspaceId)
+    ?? workspaceRows[0];
+  if (!selectedWorkspace) throw new Error("Жоба табылмады.");
   const monthRows = await queryAll<{ id: string; year: number; month: number }>(
-    "SELECT id, year, month FROM months ORDER BY year DESC, month DESC",
+    "SELECT id, year, month FROM months WHERE workspace_id = ? ORDER BY year DESC, month DESC",
+    selectedWorkspace.id,
   );
   const selectedIndex = Math.max(
     0,
-    monthRows.findIndex((month) => month.id === requestedMonthId),
+    monthRows.findIndex((month) => `${month.year}-${String(month.month).padStart(2, "0")}` === requestedMonthId),
   );
   const selectedRow = monthRows[selectedIndex] ?? monthRows[0];
   if (!selectedRow) throw new Error("Есептік ай табылмады.");
@@ -441,7 +479,7 @@ export async function loadPayrollData(requestedMonthId?: string): Promise<Payrol
         name: string;
         sort_order: number;
         archived_at: string | null;
-      }>("SELECT id, name, sort_order, archived_at FROM departments ORDER BY sort_order, name"),
+      }>("SELECT id, name, sort_order, archived_at FROM departments WHERE workspace_id = ? ORDER BY sort_order, name", selectedWorkspace.id),
       queryAll<{
         id: string;
         name: string;
@@ -449,7 +487,8 @@ export async function loadPayrollData(requestedMonthId?: string): Promise<Payrol
         is_system: number;
         archived_at: string | null;
       }>(
-        "SELECT id, name, sort_order, is_system, archived_at FROM payment_methods ORDER BY sort_order, name",
+        "SELECT id, name, sort_order, is_system, archived_at FROM payment_methods WHERE workspace_id = ? ORDER BY sort_order, name",
+        selectedWorkspace.id,
       ),
       queryAll<{
         id: string;
@@ -457,7 +496,8 @@ export async function loadPayrollData(requestedMonthId?: string): Promise<Payrol
         sort_order: number;
         archived_at: string | null;
       }>(
-        "SELECT id, name, sort_order, archived_at FROM expense_categories ORDER BY sort_order, name",
+        "SELECT id, name, sort_order, archived_at FROM expense_categories WHERE workspace_id = ? ORDER BY sort_order, name",
+        selectedWorkspace.id,
       ),
     ]);
 
@@ -489,17 +529,31 @@ export async function loadPayrollData(requestedMonthId?: string): Promise<Payrol
   });
 
   return {
+    workspaces: workspaceRows.map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+      initials: workspaceInitials(workspace.name),
+    })),
+    selectedWorkspace: {
+      id: selectedWorkspace.id,
+      name: selectedWorkspace.name,
+      initials: workspaceInitials(selectedWorkspace.name),
+    },
     months: monthRows.map((month) => ({
-      ...month,
+      id: `${month.year}-${String(month.month).padStart(2, "0")}`,
+      year: month.year,
+      month: month.month,
       label: monthLabel(month.year, month.month),
     })),
     selectedMonth: {
-      ...selectedRow,
+      id: `${selectedRow.year}-${String(selectedRow.month).padStart(2, "0")}`,
+      year: selectedRow.year,
+      month: selectedRow.month,
       label: monthLabel(selectedRow.year, selectedRow.month),
     },
     previousMonth: previousRow
       ? {
-          id: previousRow.id,
+          id: `${previousRow.year}-${String(previousRow.month).padStart(2, "0")}`,
           label: monthLabel(previousRow.year, previousRow.month),
         }
       : null,
@@ -518,6 +572,7 @@ export async function loadPayrollData(requestedMonthId?: string): Promise<Payrol
       name: category.name,
       sortOrder: category.sort_order,
       archivedAt: category.archived_at,
+      isOtherExpense: category.name === OTHER_EXPENSE_CATEGORY_NAME,
     })),
     stats: computeStats(salaryRows, expenseRows),
     previousStats: previousRow

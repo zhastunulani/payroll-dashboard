@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import {
   ensureDatabase,
   getRawDb,
@@ -66,7 +65,7 @@ function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (left.length !== right.length) return false;
   let difference = 0;
   for (let index = 0; index < left.length; index += 1) {
-    difference |= left[index] ^ right[index];
+    difference |= left[index]! ^ right[index]!;
   }
   return difference === 0;
 }
@@ -150,11 +149,6 @@ export async function verifySessionToken(token?: string | null): Promise<boolean
     new TextEncoder().encode(expected),
     new TextEncoder().encode(signature),
   );
-}
-
-export async function isPageAuthenticated(): Promise<boolean> {
-  const cookieStore = await cookies();
-  return verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
 }
 
 export async function isRequestAuthenticated(request: Request): Promise<boolean> {

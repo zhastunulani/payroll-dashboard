@@ -20,6 +20,7 @@ function expense(overrides: Partial<ExpenseRecord> = {}): ExpenseRecord {
     isRecurring: false,
     isPaid: false,
     paidAt: null,
+    isOneTime: true,
     ...overrides,
   };
 }
@@ -41,7 +42,7 @@ test("new month copying and one-time saving use opposite recurring flags", async
   assert.match(route, /FROM expenses WHERE month_id = \? AND is_recurring = 1/);
   assert.match(
     route,
-    /VALUES \(\?, \?, \?, \?, \?, \?, 0, 1, CURRENT_TIMESTAMP\)/,
+    /VALUES \(\?, \?, \?, \?, \?, \?, 0, 1, CURRENT_TIMESTAMP, \?\)/,
   );
   assert.match(route, /is_paid = 1,/);
   assert.match(route, /WHERE id = \? AND month_id = \? AND category_id = \? AND is_recurring = 0/);

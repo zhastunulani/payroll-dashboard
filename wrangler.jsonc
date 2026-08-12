@@ -1,13 +1,13 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "payroll-dashboard",
-  "main": ".open-next/worker.js",
+  "main": ".output/server/index.mjs",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": [
     "nodejs_compat"
   ],
   "assets": {
-    "directory": ".open-next/assets",
+    "directory": ".output/public",
     "binding": "ASSETS"
   },
   "observability": {

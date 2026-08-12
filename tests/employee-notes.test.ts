@@ -11,7 +11,7 @@ const route = readFileSync(
   "utf8",
 );
 const app = readFileSync(
-  new URL("../app/PayrollApp.tsx", import.meta.url),
+  new URL("../app/pages/departments.vue", import.meta.url),
   "utf8",
 );
 
@@ -55,9 +55,9 @@ test("a new month starts with blank employee notes", () => {
   );
 });
 
-test("employee notes have a visible quick editor in the department table", () => {
-  assert.match(app, /className={`employee-note/);
+test("employee notes have a visible quick editor in the Nuxt department table", () => {
+  assert.match(app, /class="note-button"/);
   assert.match(app, /Пікір қосу/);
-  assert.match(app, /void mutate\("saveEmployeeNote"/);
+  assert.match(app, /payroll\.mutate\("saveEmployeeNote"/);
   assert.match(app, /placeholder="Мысалы: 50% берілді"/);
 });

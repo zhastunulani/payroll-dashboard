@@ -34,6 +34,13 @@ export type ExpenseRecord = {
   isRecurring: boolean;
   isPaid: boolean;
   paidAt: string | null;
+  isOneTime: boolean;
+};
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  initials: string;
 };
 
 export type DashboardStats = {
@@ -57,6 +64,8 @@ export type BreakdownItem = {
 };
 
 export type PayrollData = {
+  workspaces: WorkspaceSummary[];
+  selectedWorkspace: WorkspaceSummary;
   months: Array<{ id: string; year: number; month: number; label: string }>;
   selectedMonth: { id: string; year: number; month: number; label: string };
   previousMonth: { id: string; label: string } | null;
@@ -84,6 +93,7 @@ export type PayrollData = {
     name: string;
     sortOrder: number;
     archivedAt: string | null;
+    isOtherExpense: boolean;
   }>;
   stats: DashboardStats;
   previousStats: DashboardStats | null;

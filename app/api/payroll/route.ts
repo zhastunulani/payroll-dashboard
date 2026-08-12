@@ -1,18 +1,18 @@
 import {
   changeSharedPassword,
   isRequestAuthenticated,
-} from "@/lib/auth";
+} from "../../../lib/auth";
 import {
   ensureDatabase,
   getRawDb,
   loadPayrollData,
-} from "@/lib/database";
+  MAIN_WORKSPACE_ID,
+} from "../../../lib/database";
 import {
-  OTHER_EXPENSE_CATEGORY_ID,
   OTHER_EXPENSE_CATEGORY_NAME,
-} from "@/lib/expenses";
-import { EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH } from "@/lib/months";
-import type { SalaryComponentKind } from "@/lib/types";
+} from "../../../lib/expenses";
+import { EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH } from "../../../lib/months";
+import type { SalaryComponentKind } from "../../../lib/types";
 
 type ActionBody = {
   action?: string;
@@ -67,6 +67,26 @@ function monthId(value: unknown): string {
   return result;
 }
 
+async function resolveMonthId(workspaceId: string, period: unknown): Promise<string> {
+  const normalized = monthId(period);
+  const [year, month] = normalized.split("-").map(Number);
+  const row = await getRawDb()
+    .prepare("SELECT id FROM months WHERE workspace_id = ? AND year = ? AND month = ?")
+    .bind(workspaceId, year, month)
+    .first<{ id: string }>();
+  if (!row) throw new Error("Есептік ай табылмады.");
+  return row.id;
+}
+
+async function resolveOtherCategoryId(workspaceId: string): Promise<string> {
+  const row = await getRawDb()
+    .prepare("SELECT id FROM expense_categories WHERE workspace_id = ? AND name = ? AND archived_at IS NULL")
+    .bind(workspaceId, OTHER_EXPENSE_CATEGORY_NAME)
+    .first<{ id: string }>();
+  if (!row) throw new Error("«Басқа шығындар» категориясы табылмады.");
+  return row.id;
+}
+
 function components(value: unknown): Array<{
   id?: string;
   name: string;
@@ -97,7 +117,10 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     return Response.json(
-      await loadPayrollData(url.searchParams.get("month") ?? undefined),
+      await loadPayrollData(
+        url.searchParams.get("month") ?? undefined,
+        url.searchParams.get("workspace") ?? undefined,
+      ),
     );
   } catch (error) {
     return Response.json(
@@ -121,21 +144,61 @@ export async function POST(request: Request) {
     const body = (await request.json()) as ActionBody;
     const action = text(body.action, "Әрекет");
     const db = getRawDb();
+    const workspaceId = body.workspaceId
+      ? text(body.workspaceId, "Жоба")
+      : MAIN_WORKSPACE_ID;
+    const workspace = await db.prepare("SELECT id FROM workspaces WHERE id = ?")
+      .bind(workspaceId).first<{ id: string }>();
+    if (!workspace) throw new Error("Жоба табылмады.");
+
+    if (action === "createWorkspace") {
+      const name = text(body.name, "Жоба атауы", 80);
+      const id = crypto.randomUUID();
+      const period = body.monthId ? monthId(body.monthId) : new Date().toISOString().slice(0, 7);
+      const [year, month] = period.split("-").map(Number);
+      const monthRecordId = crypto.randomUUID();
+      const order = await db.prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM workspaces")
+        .first<{ next: number }>();
+      const statements = [
+        db.prepare("INSERT INTO workspaces (id, name, sort_order) VALUES (?, ?, ?)").bind(id, name, order?.next ?? 1),
+        db.prepare("INSERT INTO months (id, year, month, workspace_id) VALUES (?, ?, ?, ?)").bind(monthRecordId, year, month, id),
+      ];
+      for (const [label, sortOrder] of [
+        ["Академ", 1], ["Мұғалімдер", 2], ["Маркетинг Eduser", 3],
+        ["Ustaz Media", 4], ["Кураторлар", 5], ["Сату бөлімі", 6],
+      ] as Array<[string, number]>) {
+        statements.push(db.prepare("INSERT INTO departments (id, name, sort_order, workspace_id) VALUES (?, ?, ?, ?)")
+          .bind(crypto.randomUUID(), label, sortOrder, id));
+      }
+      for (const [label, sortOrder] of [
+        ["Аударым", 1], ["Ресми", 2], ["Ресми + ЖК", 3], ["ЖК", 4],
+        ["Өзін-өзі жұмыспен қамтыған", 5],
+      ] as Array<[string, number]>) {
+        statements.push(db.prepare("INSERT INTO payment_methods (id, name, sort_order, is_system, workspace_id) VALUES (?, ?, ?, 1, ?)")
+          .bind(crypto.randomUUID(), label, sortOrder, id));
+      }
+      for (const [label, sortOrder] of [
+        ["Ғимарат арендасы", 1], ["Интернет", 2], ["Техникалық сервистер", 3],
+        ["Подписка", 4], [OTHER_EXPENSE_CATEGORY_NAME, 5],
+      ] as Array<[string, number]>) {
+        statements.push(db.prepare("INSERT INTO expense_categories (id, name, sort_order, workspace_id) VALUES (?, ?, ?, ?)")
+          .bind(crypto.randomUUID(), label, sortOrder, id));
+      }
+      await db.batch(statements);
+      return Response.json(await loadPayrollData(period, id));
+    }
 
     if (action === "createMonth") {
-      const targetId = monthId(body.newMonthId);
-      const sourceId = monthId(body.sourceMonthId ?? body.monthId);
+      const targetPeriod = monthId(body.newMonthId);
+      const sourcePeriod = monthId(body.sourceMonthId ?? body.monthId);
+      const sourceId = await resolveMonthId(workspaceId, sourcePeriod);
+      const [year, month] = targetPeriod.split("-").map(Number);
       const exists = await db
-        .prepare("SELECT id FROM months WHERE id = ?")
-        .bind(targetId)
+        .prepare("SELECT id FROM months WHERE workspace_id = ? AND year = ? AND month = ?")
+        .bind(workspaceId, year, month)
         .first();
       if (exists) throw new Error("Бұл ай бұрыннан бар.");
-      const [year, month] = targetId.split("-").map(Number);
-      const source = await db
-        .prepare("SELECT id FROM months WHERE id = ?")
-        .bind(sourceId)
-        .first();
-      if (!source) throw new Error("Көшірілетін ай табылмады.");
+      const targetId = crypto.randomUUID();
       const copyRecurringExpenses =
         body.copyRecurringExpenses === undefined
           ? true
@@ -151,11 +214,12 @@ export async function POST(request: Request) {
              JOIN departments d ON d.id = e.department_id
              JOIN payment_methods pm ON pm.id = e.payment_method_id
              LEFT JOIN salary_snapshots s ON s.employee_id = e.id AND s.month_id = ?
-             WHERE e.archived_at IS NULL AND d.archived_at IS NULL
+             WHERE e.workspace_id = ? AND e.archived_at IS NULL AND d.archived_at IS NULL
                AND e.department_id NOT IN (?, ?)
+               AND d.name NOT IN ('Кураторлар', 'Сату бөлімі')
              ORDER BY d.sort_order, e.full_name`,
           )
-          .bind(sourceId, ...EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH)
+          .bind(sourceId, workspaceId, ...EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH)
           .all<{
             id: string;
             full_name: string;
@@ -203,9 +267,9 @@ export async function POST(request: Request) {
       const statements = [
         db
           .prepare(
-            "INSERT INTO months (id, year, month, source_month_id) VALUES (?, ?, ?, ?)",
+            "INSERT INTO months (id, year, month, source_month_id, workspace_id) VALUES (?, ?, ?, ?, ?)",
           )
-          .bind(targetId, year, month, sourceId),
+          .bind(targetId, year, month, sourceId, workspaceId),
       ];
       for (const employee of employees) {
         const snapshotId = crypto.randomUUID();
@@ -214,8 +278,8 @@ export async function POST(request: Request) {
             .prepare(
               `INSERT INTO salary_snapshots
                (id, month_id, employee_id, department_id, employee_name, position, department_name,
-                payment_method_id, payment_method_name, base_salary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                payment_method_id, payment_method_name, base_salary, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -228,6 +292,7 @@ export async function POST(request: Request) {
               employee.payment_method_id,
               employee.payment_method_name,
               employee.base_salary,
+              workspaceId,
             ),
         );
         for (const component of sourceComponents.filter(
@@ -254,8 +319,8 @@ export async function POST(request: Request) {
           db
             .prepare(
               `INSERT INTO expenses
-               (id, month_id, category_id, category_name, name, amount, is_recurring)
-               VALUES (?, ?, ?, ?, ?, ?, 1)`,
+               (id, month_id, category_id, category_name, name, amount, is_recurring, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
             )
             .bind(
               crypto.randomUUID(),
@@ -264,21 +329,19 @@ export async function POST(request: Request) {
               expense.category_name,
               expense.name,
               expense.amount,
+              workspaceId,
             ),
         );
       }
       await db.batch(statements);
-      return Response.json(await loadPayrollData(targetId));
+      return Response.json(await loadPayrollData(targetPeriod, workspaceId));
     }
 
     if (action === "resetMonthPayments") {
-      const targetId = monthId(body.targetMonthId);
-      const selectedMonth = monthId(body.monthId);
-      const target = await db
-        .prepare("SELECT id FROM months WHERE id = ?")
-        .bind(targetId)
-        .first();
-      if (!target) throw new Error("Сброс жасалатын ай табылмады.");
+      const targetPeriod = monthId(body.targetMonthId);
+      const selectedPeriod = monthId(body.monthId);
+      const targetId = await resolveMonthId(workspaceId, targetPeriod);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
 
       await db.batch([
         db
@@ -295,23 +358,20 @@ export async function POST(request: Request) {
              WHERE month_id = ?
                AND (category_id <> ? OR is_recurring <> 0)`,
           )
-          .bind(targetId, OTHER_EXPENSE_CATEGORY_ID),
+          .bind(targetId, otherCategoryId),
       ]);
 
-      return Response.json(await loadPayrollData(selectedMonth));
+      return Response.json(await loadPayrollData(selectedPeriod, workspaceId));
     }
 
     if (action === "deleteMonth") {
-      const targetId = monthId(body.targetMonthId);
-      const selectedMonth = monthId(body.monthId);
-      const target = await db
-        .prepare("SELECT id FROM months WHERE id = ?")
-        .bind(targetId)
-        .first();
-      if (!target) throw new Error("Өшірілетін ай табылмады.");
+      const targetPeriod = monthId(body.targetMonthId);
+      const selectedPeriod = monthId(body.monthId);
+      const targetId = await resolveMonthId(workspaceId, targetPeriod);
 
       const monthCount = await db
-        .prepare("SELECT COUNT(*) AS count FROM months")
+        .prepare("SELECT COUNT(*) AS count FROM months WHERE workspace_id = ?")
+        .bind(workspaceId)
         .first<{ count: number | string }>();
       if (Number(monthCount?.count ?? 0) <= 1) {
         throw new Error("Соңғы есептік айды өшіруге болмайды.");
@@ -343,12 +403,12 @@ export async function POST(request: Request) {
       ]);
 
       return Response.json(
-        await loadPayrollData(selectedMonth === targetId ? undefined : selectedMonth),
+        await loadPayrollData(selectedPeriod === targetPeriod ? undefined : selectedPeriod, workspaceId),
       );
     }
 
     if (action === "toggleSalaryPaid") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const id = text(body.id, "Айлық");
       const paid = flag(body.isPaid);
       await db
@@ -365,7 +425,7 @@ export async function POST(request: Request) {
         )
         .run();
     } else if (action === "setSalaryPaidBulk") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const salaryIds = idList(body.ids, "Айлық");
       const paid = flag(body.isPaid);
       const placeholders = salaryIds.map(() => "?").join(", ");
@@ -383,7 +443,8 @@ export async function POST(request: Request) {
         )
         .run();
     } else if (action === "toggleExpensePaid") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
       const id = text(body.id, "Шығын");
       const paid = flag(body.isPaid);
       const current = await db
@@ -395,7 +456,7 @@ export async function POST(request: Request) {
         .first<{ category_id: string; is_recurring: number }>();
       if (!current) throw new Error("Шығын табылмады.");
       if (
-        current.category_id === OTHER_EXPENSE_CATEGORY_ID &&
+        current.category_id === otherCategoryId &&
         current.is_recurring === 0
       ) {
         throw new Error(
@@ -415,7 +476,8 @@ export async function POST(request: Request) {
         )
         .run();
     } else if (action === "setExpensePaidBulk") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
       const expenseIds = idList(body.ids, "Шығын");
       const paid = flag(body.isPaid);
       const placeholders = expenseIds.map(() => "?").join(", ");
@@ -431,11 +493,12 @@ export async function POST(request: Request) {
           paid ? new Date().toISOString() : null,
           selectedMonth,
           ...expenseIds,
-          OTHER_EXPENSE_CATEGORY_ID,
+          otherCategoryId,
         )
         .run();
     } else if (action === "deleteExpensesBulk") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
       const expenseIds = idList(body.ids, "Шығын");
       const placeholders = expenseIds.map(() => "?").join(", ");
       await db
@@ -447,11 +510,11 @@ export async function POST(request: Request) {
         .bind(
           selectedMonth,
           ...expenseIds,
-          OTHER_EXPENSE_CATEGORY_ID,
+          otherCategoryId,
         )
         .run();
     } else if (action === "saveEmployeeNote") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const snapshotId = text(body.id, "Айлық жазбасы");
       const note = optionalText(body.note, "Пікір");
       const result = await db
@@ -466,7 +529,7 @@ export async function POST(request: Request) {
         throw new Error("Қызметкердің айлық жазбасы табылмады.");
       }
     } else if (action === "saveEmployee") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const employeeId = body.employeeId
         ? text(body.employeeId, "Қызметкер")
         : crypto.randomUUID();
@@ -536,9 +599,9 @@ export async function POST(request: Request) {
           db
             .prepare(
               `INSERT INTO employees
-               (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)`,
+               (id, full_name, position, department_id, payment_method_id, workspace_id) VALUES (?, ?, ?, ?, ?, ?)`,
             )
-            .bind(employeeId, fullName, position, departmentId, paymentMethodId),
+            .bind(employeeId, fullName, position, departmentId, paymentMethodId, workspaceId),
         );
       }
       const snapshotId = currentSnapshot?.id ?? crypto.randomUUID();
@@ -579,8 +642,8 @@ export async function POST(request: Request) {
             .prepare(
               `INSERT INTO salary_snapshots
                (id, month_id, employee_id, department_id, employee_name, position, department_name,
-                payment_method_id, payment_method_name, base_salary, note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                payment_method_id, payment_method_name, base_salary, note, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -594,6 +657,7 @@ export async function POST(request: Request) {
               method.name,
               baseSalary,
               note,
+              workspaceId,
             ),
         );
       }
@@ -631,7 +695,7 @@ export async function POST(request: Request) {
         db.prepare("DELETE FROM employees WHERE id = ?").bind(id),
       ]);
     } else if (action === "deleteEmployeesBulk") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const requestedIds = idList(body.employeeIds, "Қызметкер");
       const requestedPlaceholders = requestedIds.map(() => "?").join(", ");
       const matched = (
@@ -672,18 +736,12 @@ export async function POST(request: Request) {
           .bind(...employeeIds),
       ]);
     } else if (action === "saveOneTimeExpense") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       const id = body.id ? text(body.id, "Шығын") : crypto.randomUUID();
       const name = text(body.name, "Шығын атауы");
       const amount = money(body.amount, "Шығын сомасы");
       if (amount <= 0) throw new Error("Шығын сомасы 0 ₸-ден жоғары болуы керек.");
-      const category = await db
-        .prepare(
-          "SELECT id FROM expense_categories WHERE id = ? AND archived_at IS NULL",
-        )
-        .bind(OTHER_EXPENSE_CATEGORY_ID)
-        .first<{ id: string }>();
-      if (!category) throw new Error("«Басқа шығындар» категориясы табылмады.");
+      const category = { id: await resolveOtherCategoryId(workspaceId) };
 
       if (body.id) {
         const current = await db
@@ -718,8 +776,8 @@ export async function POST(request: Request) {
           .prepare(
             `INSERT INTO expenses
              (id, month_id, category_id, category_name, name, amount,
-              is_recurring, is_paid, paid_at)
-             VALUES (?, ?, ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP)`,
+              is_recurring, is_paid, paid_at, workspace_id)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP, ?)`,
           )
           .bind(
             id,
@@ -728,18 +786,20 @@ export async function POST(request: Request) {
             OTHER_EXPENSE_CATEGORY_NAME,
             name,
             amount,
+            workspaceId,
           )
           .run();
       }
     } else if (action === "saveExpense") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
       const id = body.id ? text(body.id, "Шығын") : crypto.randomUUID();
       const name = text(body.name, "Шығын атауы");
       const categoryId = text(body.categoryId, "Категория");
       const amount = money(body.amount, "Шығын сомасы");
       const recurring = flag(body.isRecurring);
       if (
-        categoryId === OTHER_EXPENSE_CATEGORY_ID &&
+        categoryId === otherCategoryId &&
         !recurring &&
         !body.id
       ) {
@@ -766,7 +826,7 @@ export async function POST(request: Request) {
           }>();
         if (!current) throw new Error("Шығын табылмады.");
         if (
-          current.category_id === OTHER_EXPENSE_CATEGORY_ID &&
+          current.category_id === otherCategoryId &&
           current.is_recurring === 0
         ) {
           throw new Error(
@@ -796,8 +856,8 @@ export async function POST(request: Request) {
         await db
           .prepare(
             `INSERT INTO expenses
-             (id, month_id, category_id, category_name, name, amount, is_recurring)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             (id, month_id, category_id, category_name, name, amount, is_recurring, workspace_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
@@ -807,11 +867,12 @@ export async function POST(request: Request) {
             name,
             amount,
             recurring ? 1 : 0,
+            workspaceId,
           )
           .run();
       }
     } else if (action === "deleteExpense") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       await db
         .prepare("DELETE FROM expenses WHERE id = ? AND month_id = ?")
         .bind(text(body.id, "Шығын"), selectedMonth)
@@ -819,7 +880,7 @@ export async function POST(request: Request) {
     } else if (action === "saveDepartment") {
       const id = body.id ? text(body.id, "Бөлім") : crypto.randomUUID();
       const name = text(body.name, "Бөлім атауы");
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       if (body.id) {
         await db.batch([
           db
@@ -836,13 +897,14 @@ export async function POST(request: Request) {
         ]);
       } else {
         const order = await db
-          .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM departments")
+          .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM departments WHERE workspace_id = ?")
+          .bind(workspaceId)
           .first<{ next: number }>();
         await db
           .prepare(
-            "INSERT INTO departments (id, name, sort_order) VALUES (?, ?, ?)",
+            "INSERT INTO departments (id, name, sort_order, workspace_id) VALUES (?, ?, ?, ?)",
           )
-          .bind(id, name, order?.next ?? 1)
+          .bind(id, name, order?.next ?? 1, workspaceId)
           .run();
       }
     } else if (action === "archiveDepartment") {
@@ -865,7 +927,7 @@ export async function POST(request: Request) {
     } else if (action === "savePaymentMethod") {
       const id = body.id ? text(body.id, "Төлем түрі") : crypto.randomUUID();
       const name = text(body.name, "Төлем түрі");
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       if (body.id) {
         await db.batch([
           db
@@ -882,13 +944,14 @@ export async function POST(request: Request) {
         ]);
       } else {
         const order = await db
-          .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM payment_methods")
+          .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM payment_methods WHERE workspace_id = ?")
+          .bind(workspaceId)
           .first<{ next: number }>();
         await db
           .prepare(
-            "INSERT INTO payment_methods (id, name, sort_order, is_system) VALUES (?, ?, ?, 0)",
+            "INSERT INTO payment_methods (id, name, sort_order, is_system, workspace_id) VALUES (?, ?, ?, 0, ?)",
           )
-          .bind(id, name, order?.next ?? 1)
+          .bind(id, name, order?.next ?? 1, workspaceId)
           .run();
       }
     } else if (action === "archivePaymentMethod") {
@@ -911,8 +974,9 @@ export async function POST(request: Request) {
     } else if (action === "saveExpenseCategory") {
       const id = body.id ? text(body.id, "Категория") : crypto.randomUUID();
       const name = text(body.name, "Категория атауы");
-      const selectedMonth = monthId(body.monthId);
-      if (body.id && id === OTHER_EXPENSE_CATEGORY_ID) {
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
+      if (body.id && id === otherCategoryId) {
         throw new Error("«Басқа шығындар» — жүйелік категория және өзгертілмейді.");
       }
       if (body.id) {
@@ -932,19 +996,21 @@ export async function POST(request: Request) {
       } else {
         const order = await db
           .prepare(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM expense_categories",
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM expense_categories WHERE workspace_id = ?",
           )
+          .bind(workspaceId)
           .first<{ next: number }>();
         await db
           .prepare(
-            "INSERT INTO expense_categories (id, name, sort_order) VALUES (?, ?, ?)",
+            "INSERT INTO expense_categories (id, name, sort_order, workspace_id) VALUES (?, ?, ?, ?)",
           )
-          .bind(id, name, order?.next ?? 1)
+          .bind(id, name, order?.next ?? 1, workspaceId)
           .run();
       }
     } else if (action === "archiveExpenseCategory") {
       const id = text(body.id, "Категория");
-      if (id === OTHER_EXPENSE_CATEGORY_ID) {
+      const otherCategoryId = await resolveOtherCategoryId(workspaceId);
+      if (id === otherCategoryId) {
         throw new Error("«Басқа шығындар» жүйелік категориясын архивтеуге болмайды.");
       }
       await db
@@ -957,19 +1023,21 @@ export async function POST(request: Request) {
       await changeSharedPassword(text(body.password, "Жаңа пароль", 200));
       return Response.json({ ok: true, signedOut: true });
     } else if (action === "importEmployees") {
-      const selectedMonth = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
       if (!Array.isArray(body.rows) || !body.rows.length) {
         throw new Error("Импорт жолдары табылмады.");
       }
       if (body.rows.length > 2_000) throw new Error("Бір импортта 2000 жолдан артық болмауы керек.");
       const departmentRows = (
         await db
-          .prepare("SELECT id, name FROM departments WHERE archived_at IS NULL")
+          .prepare("SELECT id, name FROM departments WHERE workspace_id = ? AND archived_at IS NULL")
+          .bind(workspaceId)
           .all<{ id: string; name: string }>()
       ).results;
       const methodRows = (
         await db
-          .prepare("SELECT id, name FROM payment_methods WHERE archived_at IS NULL")
+          .prepare("SELECT id, name FROM payment_methods WHERE workspace_id = ? AND archived_at IS NULL")
+          .bind(workspaceId)
           .all<{ id: string; name: string }>()
       ).results;
       const departmentMap = new Map(
@@ -999,8 +1067,9 @@ export async function POST(request: Request) {
         await db
           .prepare(
             `SELECT id, LOWER(full_name) AS name, department_id
-             FROM employees WHERE archived_at IS NULL`,
+             FROM employees WHERE workspace_id = ? AND archived_at IS NULL`,
           )
+          .bind(workspaceId)
           .all<{ id: string; name: string; department_id: string }>()
       ).results;
       const reusableEmployeeMap = new Map(
@@ -1061,9 +1130,9 @@ export async function POST(request: Request) {
           statements.push(
             db
               .prepare(
-                "INSERT INTO employees (id, full_name, position, department_id, payment_method_id) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO employees (id, full_name, position, department_id, payment_method_id, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
               )
-              .bind(employeeId, fullName, position, department.id, method.id),
+              .bind(employeeId, fullName, position, department.id, method.id, workspaceId),
           );
           reusableEmployeeMap.set(duplicateKey, employeeId);
         } else {
@@ -1083,8 +1152,8 @@ export async function POST(request: Request) {
             .prepare(
               `INSERT INTO salary_snapshots
                (id, month_id, employee_id, department_id, employee_name, position, department_name,
-                payment_method_id, payment_method_name, base_salary, is_paid, paid_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                payment_method_id, payment_method_name, base_salary, is_paid, paid_at, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -1099,6 +1168,7 @@ export async function POST(request: Request) {
               importedSalary,
               flag(row.isPaid) ? 1 : 0,
               flag(row.isPaid) ? new Date().toISOString() : null,
+              workspaceId,
             ),
         );
       }
@@ -1107,7 +1177,10 @@ export async function POST(request: Request) {
       throw new Error("Белгісіз әрекет.");
     }
 
-    return Response.json(await loadPayrollData(body.monthId ? monthId(body.monthId) : undefined));
+    return Response.json(await loadPayrollData(
+      body.monthId ? monthId(body.monthId) : undefined,
+      workspaceId,
+    ));
   } catch (error) {
     return Response.json(
       {

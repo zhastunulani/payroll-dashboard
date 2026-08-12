@@ -29,9 +29,9 @@ test("Cloudflare Worker uses the free-compatible always-ready configuration", as
     secrets: { required: string[] };
   };
   assert.equal(workerConfig.name, "payroll-dashboard");
-  assert.equal(workerConfig.main, ".open-next/worker.js");
+  assert.equal(workerConfig.main, ".output/server/index.mjs");
   assert.deepEqual(workerConfig.compatibility_flags, ["nodejs_compat"]);
-  assert.equal(workerConfig.assets.directory, ".open-next/assets");
+  assert.equal(workerConfig.assets.directory, ".output/public");
   assert.deepEqual(workerConfig.secrets.required.sort(), [
     "APP_PASSWORD_HASH",
     "DATABASE_URL",
@@ -44,7 +44,8 @@ test("Cloudflare Worker uses the free-compatible always-ready configuration", as
     scripts: Record<string, string>;
     dependencies: Record<string, string>;
   };
-  assert.match(packageJson.scripts["build:worker"], /cloudflare-command/);
+  assert.match(packageJson.scripts["build:worker"], /nuxt build --preset=cloudflare_module/);
+  assert.ok(packageJson.dependencies.nuxt);
   assert.ok(packageJson.dependencies["@neondatabase/serverless"]);
   assert.equal(packageJson.dependencies.pg, undefined);
 });

@@ -7,10 +7,11 @@ export const EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH = [
 
 export function shouldCopyDepartmentToNewMonth(
   departmentId: string,
+  departmentName = "",
 ): boolean {
   return !EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH.some(
     (excludedId) => excludedId === departmentId,
-  );
+  ) && !["Кураторлар", "Сату бөлімі"].includes(departmentName.trim());
 }
 
 export function addMonths(monthId: string, offset: number): string {

@@ -1,4 +1,4 @@
-import { ensureDatabase, getRawDb } from "@/lib/database";
+import { ensureDatabase, getRawDb } from "../../../lib/database";
 
 export const dynamic = "force-dynamic";
 

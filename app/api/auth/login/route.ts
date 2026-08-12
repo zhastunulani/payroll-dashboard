@@ -4,7 +4,7 @@ import {
   isSecureRequest,
   sessionCookie,
   verifyPassword,
-} from "@/lib/auth";
+} from "../../../../lib/auth";
 
 const attempts = new Map<string, { failures: number; resetAt: number }>();
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;

@@ -1,4 +1,4 @@
-import { clearSessionCookie, isSecureRequest } from "@/lib/auth";
+import { clearSessionCookie, isSecureRequest } from "../../../../lib/auth";
 
 export async function POST(request: Request) {
   const secure = isSecureRequest(request);

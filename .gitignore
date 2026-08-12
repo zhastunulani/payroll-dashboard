@@ -19,6 +19,10 @@
 /.vinext/
 /out/
 
+# nuxt
+/.nuxt/
+/.output/
+
 # misc
 .DS_Store
 *.pem
@@ -46,6 +50,7 @@ cloudflare-env.d.ts
 /outputs/
 /work/
 /tmp-dev.*.log
+/tmp-nuxt-dev.*.log
 
 # payroll source data
 *.xlsx

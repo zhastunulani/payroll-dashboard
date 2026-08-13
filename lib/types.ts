@@ -30,6 +30,8 @@ export type ExpenseRecord = {
   categoryId: string;
   categoryName: string;
   name: string;
+  departmentId: string | null;
+  departmentName: string | null;
   amount: number;
   isRecurring: boolean;
   isPaid: boolean;

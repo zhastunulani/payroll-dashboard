@@ -69,6 +69,13 @@ async function initializeDatabase(): Promise<void> {
                   AND column_name = 'note'
               ) AS has_salary_note,
               (
+                SELECT COUNT(*) = 2
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'expenses'
+                  AND column_name IN ('department_id', 'department_name')
+              ) AS has_expense_department,
+              (
                 SELECT COUNT(*) = 7
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
@@ -83,6 +90,7 @@ async function initializeDatabase(): Promise<void> {
       table_name: string | null;
       workspaces_table: string | null;
       has_salary_note: boolean;
+      has_expense_department: boolean;
       has_workspace_scope: boolean;
     }>();
   // Schema migrations are only required for a new or outdated database. The
@@ -93,6 +101,7 @@ async function initializeDatabase(): Promise<void> {
     existingSchema?.table_name &&
     existingSchema.workspaces_table &&
     existingSchema.has_salary_note &&
+    existingSchema.has_expense_department &&
     existingSchema.has_workspace_scope
   ) return;
 
@@ -102,6 +111,12 @@ async function initializeDatabase(): Promise<void> {
           "ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''",
         )
         .run();
+  }
+  if (existingSchema?.table_name && !existingSchema.has_expense_department) {
+    await db.batch([
+      db.prepare("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS department_id TEXT"),
+      db.prepare("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS department_name TEXT"),
+    ]);
   }
 
   const statements = [
@@ -190,6 +205,8 @@ async function initializeDatabase(): Promise<void> {
       category_id TEXT NOT NULL,
       category_name TEXT NOT NULL,
       name TEXT NOT NULL,
+      department_id TEXT,
+      department_name TEXT,
       amount INTEGER NOT NULL DEFAULT 0,
       is_recurring INTEGER NOT NULL DEFAULT 1,
       is_paid INTEGER NOT NULL DEFAULT 0,
@@ -436,12 +453,15 @@ async function loadExpenses(monthId: string): Promise<ExpenseRecord[]> {
     category_id: string;
     category_name: string;
     name: string;
+    department_id: string | null;
+    department_name: string | null;
     amount: number;
     is_recurring: number;
     is_paid: number;
     paid_at: string | null;
   }>(
-    `SELECT id, category_id, category_name, name, amount, is_recurring, is_paid, paid_at
+    `SELECT id, category_id, category_name, name, department_id, department_name,
+            amount, is_recurring, is_paid, paid_at
      FROM expenses WHERE month_id = ? ORDER BY category_name, name`,
     monthId,
   );
@@ -450,6 +470,8 @@ async function loadExpenses(monthId: string): Promise<ExpenseRecord[]> {
     categoryId: row.category_id,
     categoryName: row.category_name,
     name: row.name,
+    departmentId: row.department_id,
+    departmentName: row.department_name,
     amount: row.amount,
     isRecurring: Boolean(row.is_recurring),
     isPaid: Boolean(row.is_paid),

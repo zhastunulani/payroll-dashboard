@@ -56,10 +56,13 @@ test("paid and remaining totals include salaries and expenses", () => {
       categoryId: "c1",
       categoryName: "Интернет",
       name: "Интернет",
+      departmentId: null,
+      departmentName: null,
       amount: 50_000,
       isRecurring: true,
       isPaid: true,
       paidAt: null,
+      isOneTime: false,
     },
   ];
   assert.deepEqual(computeStats(salaries, expenses), {
@@ -81,10 +84,13 @@ test("one-time other expenses are immediately counted as spent", () => {
       categoryId: "expense-other",
       categoryName: "Басқа шығындар",
       name: "Парта",
+      departmentId: null,
+      departmentName: null,
       amount: 420_000,
       isRecurring: false,
       isPaid: true,
       paidAt: null,
+      isOneTime: true,
     },
   ];
 

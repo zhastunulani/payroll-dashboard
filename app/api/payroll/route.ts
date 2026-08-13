@@ -252,15 +252,17 @@ export async function POST(request: Request) {
         ? (
             await db
               .prepare(
-                `SELECT category_id, category_name, name, amount
-                 FROM expenses WHERE month_id = ? AND is_recurring = 1`,
+                `SELECT category_id, category_name, name, department_id, department_name, amount
+                  FROM expenses WHERE month_id = ? AND is_recurring = 1`,
               )
               .bind(sourceId)
               .all<{
                 category_id: string;
-                category_name: string;
-                name: string;
-                amount: number;
+                 category_name: string;
+                 name: string;
+                 department_id: string | null;
+                 department_name: string | null;
+                 amount: number;
               }>()
           ).results
         : [];
@@ -319,8 +321,9 @@ export async function POST(request: Request) {
           db
             .prepare(
               `INSERT INTO expenses
-               (id, month_id, category_id, category_name, name, amount, is_recurring, workspace_id)
-               VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+               (id, month_id, category_id, category_name, name, department_id,
+                department_name, amount, is_recurring, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
             )
             .bind(
               crypto.randomUUID(),
@@ -328,6 +331,8 @@ export async function POST(request: Request) {
               expense.category_id,
               expense.category_name,
               expense.name,
+              expense.department_id,
+              expense.department_name,
               expense.amount,
               workspaceId,
             ),
@@ -829,10 +834,32 @@ export async function POST(request: Request) {
         );
       }
       const category = await db
-        .prepare("SELECT name FROM expense_categories WHERE id = ? AND archived_at IS NULL")
-        .bind(categoryId)
+        .prepare(
+          `SELECT name FROM expense_categories
+           WHERE id = ? AND workspace_id = ? AND archived_at IS NULL`,
+        )
+        .bind(categoryId, workspaceId)
         .first<{ name: string }>();
       if (!category) throw new Error("Шығын категориясы табылмады.");
+      const isSubscription = category.name.toLocaleLowerCase("kk-KZ").includes("подпис");
+      const departmentId = body.departmentId
+        ? text(body.departmentId, "Бөлім")
+        : null;
+      let departmentName: string | null = null;
+      if (departmentId) {
+        const department = await db
+          .prepare(
+            `SELECT name FROM departments
+             WHERE id = ? AND workspace_id = ? AND archived_at IS NULL`,
+          )
+          .bind(departmentId, workspaceId)
+          .first<{ name: string }>();
+        if (!department) throw new Error("Шығын бөлімі табылмады.");
+        departmentName = department.name;
+      }
+      if (isSubscription && !departmentId) {
+        throw new Error("Подписка қай бөлімге тиесілі екенін таңдаңыз.");
+      }
       if (body.id) {
         const current = await db
           .prepare(
@@ -856,7 +883,8 @@ export async function POST(request: Request) {
         }
         await db
           .prepare(
-            `UPDATE expenses SET category_id = ?, category_name = ?, name = ?, amount = ?,
+            `UPDATE expenses SET category_id = ?, category_name = ?, name = ?,
+             department_id = ?, department_name = ?, amount = ?,
              is_recurring = ?, is_paid = CASE WHEN amount <> ? THEN 0 ELSE is_paid END,
              paid_at = CASE WHEN amount <> ? THEN NULL ELSE paid_at END,
              updated_at = CURRENT_TIMESTAMP WHERE id = ? AND month_id = ?`,
@@ -865,6 +893,8 @@ export async function POST(request: Request) {
             categoryId,
             category.name,
             name,
+            departmentId,
+            departmentName,
             amount,
             recurring ? 1 : 0,
             amount,
@@ -877,8 +907,9 @@ export async function POST(request: Request) {
         await db
           .prepare(
             `INSERT INTO expenses
-             (id, month_id, category_id, category_name, name, amount, is_recurring, workspace_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, month_id, category_id, category_name, name, department_id,
+              department_name, amount, is_recurring, workspace_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
@@ -886,6 +917,8 @@ export async function POST(request: Request) {
             categoryId,
             category.name,
             name,
+            departmentId,
+            departmentName,
             amount,
             recurring ? 1 : 0,
             workspaceId,

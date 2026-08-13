@@ -36,6 +36,20 @@ test("workspace switcher is located immediately above logout", async () => {
   assert.match(switcher, /createWorkspace/);
 });
 
+test("mobile users can switch projects from settings", async () => {
+  const navigation = await readFile(new URL("app/components/AppNavigation.vue", root), "utf8");
+  const settings = await readFile(new URL("app/pages/settings.vue", root), "utf8");
+  const styles = await readFile(new URL("app/assets/css/main.css", root), "utf8");
+  assert.match(navigation, /startSettingsHold/);
+  assert.match(navigation, /setTimeout\(\(\) => \{[\s\S]*projectSheetOpen\.value = true;[\s\S]*\}, 520\)/);
+  assert.match(navigation, /class="project-sheet-backdrop"/);
+  assert.match(navigation, /payroll\.switchWorkspace\(id\)/);
+  assert.doesNotMatch(settings, /mobile-project-switcher/);
+  assert.doesNotMatch(settings, /id: "projects" as const/);
+  assert.match(styles, /project-sheet-options button\.active/);
+  assert.match(styles, /table-toolbar > \.search-field \{ width: min\(100%,340px\); \}/);
+});
+
 test("TamshyLab uses its own workspace color palette", async () => {
   const shell = await readFile(new URL("app/components/AppShell.vue", root), "utf8");
   const styles = await readFile(new URL("app/assets/css/main.css", root), "utf8");

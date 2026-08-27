@@ -1,0 +1,25 @@
+[Unit]
+Description=Payroll Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=payroll
+Group=payroll
+WorkingDirectory=/var/www/payroll-dashboard/current
+EnvironmentFile=/var/www/payroll-dashboard/shared/.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4300
+ExecStart=/usr/bin/node .output/server/index.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/www/payroll-dashboard
+
+[Install]
+WantedBy=multi-user.target

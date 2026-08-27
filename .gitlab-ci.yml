@@ -1,0 +1,41 @@
+stages:
+  - verify
+  - deploy
+
+default:
+  image: node:22-bookworm
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+
+verify:
+  stage: verify
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+  script:
+    - npm run lint
+    - npm run typecheck
+    - npm run test:unit
+
+deploy_production:
+  stage: deploy
+  resource_group: payroll-production
+  environment:
+    name: production
+    url: https://payroll.zhastunulani.kz
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $DEPLOY_HOST && $DEPLOY_USER && $DEPLOY_ROOT && $DEPLOY_SSH_KEY_B64'
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+    - apt-get update -qq
+    - apt-get install -y -qq openssh-client
+    - install -d -m 700 ~/.ssh
+    - printf '%s' "$DEPLOY_SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+  script:
+    - npm run build
+    - bash scripts/deploy-vps.sh

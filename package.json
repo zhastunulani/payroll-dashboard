@@ -16,7 +16,7 @@
     "sync:worker-env": "node scripts/sync-cloudflare-dev-env.mjs",
     "postinstall": "nuxt prepare",
     "hash-password": "node scripts/hash-password.mjs",
-    "test:unit": "node --experimental-transform-types --test tests/calculations.test.ts tests/postgres-database.test.ts tests/money.test.ts tests/months.test.ts tests/payroll-import.test.ts tests/bulk-employees.test.ts tests/expenses.test.ts tests/keep-alive.test.ts tests/employee-notes.test.ts tests/workspaces.test.ts tests/performance.test.ts",
+    "test:unit": "node --experimental-transform-types --test tests/calculations.test.ts tests/postgres-database.test.ts tests/money.test.ts tests/months.test.ts tests/payroll-import.test.ts tests/bulk-employees.test.ts tests/expenses.test.ts tests/keep-alive.test.ts tests/employee-notes.test.ts tests/workspaces.test.ts tests/performance.test.ts tests/payroll-export.test.ts",
     "typecheck": "nuxt typecheck",
     "test": "npm run test:unit && npm run typecheck && npm run build",
     "lint": "eslint ."
@@ -27,7 +27,8 @@
     "lucide-vue-next": "^0.468.0",
     "nuxt": "^4.5.1",
     "read-excel-file": "^9.3.4",
-    "vue-router": "5.2.0"
+    "vue-router": "5.2.0",
+    "write-excel-file": "^2.3.10"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.15.2",

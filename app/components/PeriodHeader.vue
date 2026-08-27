@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, CopyPlus, Plus, ReceiptText, UsersRound, WalletCards } from "lucide-vue-next";
+import { ChevronLeft, ChevronRight, CopyPlus, Download, Plus, ReceiptText, UsersRound, WalletCards } from "lucide-vue-next";
 import { shouldCopyDepartmentToNewMonth, nextAvailableMonthId } from "../../lib/months";
 import type { PayrollData } from "../../lib/types";
 
@@ -7,6 +7,7 @@ const payroll = usePayroll();
 const route = useRoute();
 const { formatMoney } = useFormatters();
 const monthModal = ref(false);
+const exportModal = ref(false);
 const sourceMonthId = ref("");
 const targetMonthId = ref("");
 const copyRecurring = ref(true);
@@ -95,6 +96,7 @@ async function createMonth() {
         />
         <button type="button" aria-label="Келесі ай" :disabled="!canNewer" @click="move(-1)"><ChevronRight :size="18" /></button>
       </div>
+      <button class="button secondary export-button" type="button" @click="exportModal = true"><Download :size="17" /><span>Ведомость</span></button>
       <button class="button primary new-month-button" type="button" @click="openMonth"><Plus :size="18" /><span><strong>Жаңа ай</strong><small>Есепті көшіру</small></span></button>
     </div>
   </header>
@@ -115,4 +117,5 @@ async function createMonth() {
       <div class="modal-actions"><button type="button" class="button ghost" @click="monthModal = false">Болдырмау</button><button class="button primary" :disabled="payroll.saving.value || previewLoading">{{ payroll.saving.value ? "Құрылуда…" : "Айды құру" }}</button></div>
     </form>
   </UiModal>
+  <PayrollExportModal v-if="exportModal" @close="exportModal = false" />
 </template>

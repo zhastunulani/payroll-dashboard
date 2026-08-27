@@ -84,7 +84,14 @@ async function initializeDatabase(): Promise<void> {
                     'salary_snapshots', 'expense_categories', 'expenses'
                   )
                   AND column_name = 'workspace_id'
-              ) AS has_workspace_scope`,
+              ) AS has_workspace_scope,
+              (
+                SELECT COUNT(*) = 8
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name IN ('employees', 'salary_snapshots')
+                  AND column_name IN ('smz_enabled', 'smz_unrestricted', 'job_level', 'smz_limit')
+              ) AS has_smz_settings`,
     )
     .first<{
       table_name: string | null;
@@ -92,6 +99,7 @@ async function initializeDatabase(): Promise<void> {
       has_salary_note: boolean;
       has_expense_department: boolean;
       has_workspace_scope: boolean;
+      has_smz_settings: boolean;
     }>();
   // Schema migrations are only required for a new or outdated database. The
   // old path executed every CREATE/ALTER/seed batch whenever Workers created a
@@ -102,7 +110,8 @@ async function initializeDatabase(): Promise<void> {
     existingSchema.workspaces_table &&
     existingSchema.has_salary_note &&
     existingSchema.has_expense_department &&
-    existingSchema.has_workspace_scope
+    existingSchema.has_workspace_scope &&
+    existingSchema.has_smz_settings
   ) return;
 
   if (existingSchema?.table_name && !existingSchema.has_salary_note) {
@@ -158,6 +167,10 @@ async function initializeDatabase(): Promise<void> {
       position TEXT NOT NULL DEFAULT '',
       department_id TEXT NOT NULL,
       payment_method_id TEXT NOT NULL,
+      smz_enabled INTEGER NOT NULL DEFAULT 0,
+      smz_unrestricted INTEGER NOT NULL DEFAULT 0,
+      job_level INTEGER NOT NULL DEFAULT 1,
+      smz_limit INTEGER NOT NULL DEFAULT 1200000,
       archived_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -174,6 +187,10 @@ async function initializeDatabase(): Promise<void> {
       payment_method_name TEXT NOT NULL,
       base_salary INTEGER NOT NULL DEFAULT 0,
       note TEXT NOT NULL DEFAULT '',
+      smz_enabled INTEGER NOT NULL DEFAULT 0,
+      smz_unrestricted INTEGER NOT NULL DEFAULT 0,
+      job_level INTEGER NOT NULL DEFAULT 1,
+      smz_limit INTEGER NOT NULL DEFAULT 1200000,
       is_paid INTEGER NOT NULL DEFAULT 0,
       paid_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -234,6 +251,16 @@ async function initializeDatabase(): Promise<void> {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS months_workspace_period_idx ON months(workspace_id, year, month)"),
     db.prepare("CREATE INDEX IF NOT EXISTS salary_workspace_month_idx ON salary_snapshots(workspace_id, month_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS expenses_workspace_month_idx ON expenses(workspace_id, month_id)"),
+  ]);
+  await db.batch([
+    db.prepare("ALTER TABLE employees ADD COLUMN IF NOT EXISTS smz_enabled INTEGER NOT NULL DEFAULT 0"),
+    db.prepare("ALTER TABLE employees ADD COLUMN IF NOT EXISTS smz_unrestricted INTEGER NOT NULL DEFAULT 0"),
+    db.prepare("ALTER TABLE employees ADD COLUMN IF NOT EXISTS job_level INTEGER NOT NULL DEFAULT 1"),
+    db.prepare("ALTER TABLE employees ADD COLUMN IF NOT EXISTS smz_limit INTEGER NOT NULL DEFAULT 1200000"),
+    db.prepare("ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS smz_enabled INTEGER NOT NULL DEFAULT 0"),
+    db.prepare("ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS smz_unrestricted INTEGER NOT NULL DEFAULT 0"),
+    db.prepare("ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS job_level INTEGER NOT NULL DEFAULT 1"),
+    db.prepare("ALTER TABLE salary_snapshots ADD COLUMN IF NOT EXISTS smz_limit INTEGER NOT NULL DEFAULT 1200000"),
   ]);
 
   const now = new Date();
@@ -382,6 +409,10 @@ type SalaryRow = {
   payment_method_name: string;
   base_salary: number;
   note: string;
+  smz_enabled: number;
+  smz_unrestricted: number;
+  job_level: number;
+  smz_limit: number;
   is_paid: number;
   paid_at: string | null;
   archived_at: string | null;
@@ -396,6 +427,7 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
   }>(
     `SELECT s.id, s.employee_id, s.employee_name, s.position, s.department_id, s.department_name,
              s.payment_method_id, s.payment_method_name, s.base_salary, s.note, s.is_paid,
+             s.smz_enabled, s.smz_unrestricted, s.job_level, s.smz_limit,
              s.paid_at, e.archived_at,
              c.id AS component_id, c.name AS component_name,
              c.kind AS component_kind, c.amount AS component_amount
@@ -421,6 +453,10 @@ async function loadSalaries(monthId: string): Promise<SalaryRecord[]> {
       paymentMethodName: row.payment_method_name,
       baseSalary: row.base_salary,
       note: row.note,
+      smzEnabled: Boolean(row.smz_enabled),
+      smzUnrestricted: Boolean(row.smz_unrestricted),
+      jobLevel: row.job_level,
+      smzLimit: row.smz_limit,
       components: [],
       total: row.base_salary,
       isPaid: Boolean(row.is_paid),

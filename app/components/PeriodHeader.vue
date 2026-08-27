@@ -19,6 +19,7 @@ const titles: Record<string, { eyebrow: string; title: string; text: string }> =
   "/departments": { eyebrow: "Команда", title: "Бөлімдердің айлығы", text: "Әр бөлімнің жалақы қорын басқарыңыз" },
   "/expenses": { eyebrow: "Операциялар", title: "Тұрақты шығындар", text: "Аренда, интернет және сервистер" },
   "/other-expenses": { eyebrow: "Реестр", title: "Жұмсалған ақша", text: "Бір реттік сатып алулар мен шығындар" },
+  "/smz": { eyebrow: "Төлем маршруты", title: "SMZ бойынша бөлу", text: "Айлықтарды лимит пен қызметтік деңгейге сай бөліңіз" },
   "/settings": { eyebrow: "Жүйе", title: "Баптаулар", text: "Айлар, команда және анықтамалықтар" },
 };
 const heading = computed(() => titles[route.path] ?? titles["/"]!);

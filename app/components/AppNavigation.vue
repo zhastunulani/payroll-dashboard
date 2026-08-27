@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingBag, UsersRound, X } from "lucide-vue-next";
+import { Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, ShoppingBag, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const route = useRoute();
@@ -8,6 +8,7 @@ const links = [
   { to: "/departments", label: "Бөлімдер", short: "Айлық", icon: UsersRound },
   { to: "/expenses", label: "Шығындар", short: "Шығын", icon: ReceiptText },
   { to: "/other-expenses", label: "Басқа шығындар", short: "Реестр", icon: ShoppingBag },
+  { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network },
   { to: "/settings", label: "Баптаулар", short: "Баптау", icon: Settings2 },
 ];
 const projectSheetOpen = ref(false);

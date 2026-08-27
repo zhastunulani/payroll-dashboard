@@ -209,6 +209,10 @@ export async function POST(request: Request) {
           .prepare(
             `SELECT e.id, e.full_name, e.position, e.department_id, d.name AS department_name,
                     e.payment_method_id, pm.name AS payment_method_name,
+                    COALESCE(s.smz_enabled, e.smz_enabled, 0) AS smz_enabled,
+                    COALESCE(s.smz_unrestricted, e.smz_unrestricted, 0) AS smz_unrestricted,
+                    COALESCE(s.job_level, e.job_level, 1) AS job_level,
+                    COALESCE(s.smz_limit, e.smz_limit, 1200000) AS smz_limit,
                     s.id AS source_snapshot_id, COALESCE(s.base_salary, 0) AS base_salary
              FROM employees e
              JOIN departments d ON d.id = e.department_id
@@ -228,6 +232,10 @@ export async function POST(request: Request) {
             department_name: string;
             payment_method_id: string;
             payment_method_name: string;
+            smz_enabled: number;
+            smz_unrestricted: number;
+            job_level: number;
+            smz_limit: number;
             source_snapshot_id: string | null;
             base_salary: number;
           }>()
@@ -280,8 +288,9 @@ export async function POST(request: Request) {
             .prepare(
               `INSERT INTO salary_snapshots
                (id, month_id, employee_id, department_id, employee_name, position, department_name,
-                payment_method_id, payment_method_name, base_salary, workspace_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                payment_method_id, payment_method_name, base_salary,
+                smz_enabled, smz_unrestricted, job_level, smz_limit, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .bind(
               snapshotId,
@@ -294,6 +303,10 @@ export async function POST(request: Request) {
               employee.payment_method_id,
               employee.payment_method_name,
               employee.base_salary,
+              employee.smz_enabled,
+              employee.smz_unrestricted,
+              employee.job_level,
+              employee.smz_limit,
               workspaceId,
             ),
         );
@@ -701,6 +714,53 @@ export async function POST(request: Request) {
               component.kind,
               component.amount,
             ),
+        );
+      }
+      await db.batch(statements);
+    } else if (action === "saveSmzSettings") {
+      const selectedMonth = await resolveMonthId(workspaceId, body.monthId);
+      if (!Array.isArray(body.rows) || !body.rows.length) {
+        throw new Error("SMZ баптаулары табылмады.");
+      }
+      if (body.rows.length > 2_000) throw new Error("SMZ баптаулары тым көп.");
+      const snapshotIds = body.rows.map((raw) => text((raw as Record<string, unknown>).id, "Айлық жазбасы"));
+      const placeholders = snapshotIds.map(() => "?").join(", ");
+      const snapshots = (
+        await db.prepare(
+          `SELECT id, employee_id FROM salary_snapshots
+           WHERE month_id = ? AND workspace_id = ? AND id IN (${placeholders})`,
+        ).bind(selectedMonth, workspaceId, ...snapshotIds)
+          .all<{ id: string; employee_id: string }>()
+      ).results;
+      if (snapshots.length !== new Set(snapshotIds).size) {
+        throw new Error("Қызметкерлердің кейбір айлық жазбалары табылмады.");
+      }
+      const employeesBySnapshot = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot.employee_id]));
+      const statements = [];
+      for (const raw of body.rows) {
+        const row = raw as Record<string, unknown>;
+        const snapshotId = text(row.id, "Айлық жазбасы");
+        const enabled = flag(row.smzEnabled);
+        const unrestricted = flag(row.smzUnrestricted);
+        const jobLevel = Number(row.jobLevel);
+        if (!Number.isInteger(jobLevel) || jobLevel < 1 || jobLevel > 4) {
+          throw new Error("Лауазым деңгейі дұрыс емес.");
+        }
+        const limit = money(row.smzLimit, "SMZ лимиті");
+        if (enabled && limit <= 0) throw new Error("SMZ лимиті нөлден жоғары болуы керек.");
+        const employeeId = employeesBySnapshot.get(snapshotId);
+        if (!employeeId) throw new Error("Қызметкердің айлық жазбасы табылмады.");
+        statements.push(
+          db.prepare(
+            `UPDATE salary_snapshots
+             SET smz_enabled = ?, smz_unrestricted = ?, job_level = ?, smz_limit = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND month_id = ? AND workspace_id = ?`,
+          ).bind(enabled ? 1 : 0, unrestricted ? 1 : 0, jobLevel, limit, snapshotId, selectedMonth, workspaceId),
+          db.prepare(
+            `UPDATE employees
+             SET smz_enabled = ?, smz_unrestricted = ?, job_level = ?, smz_limit = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND workspace_id = ?`,
+          ).bind(enabled ? 1 : 0, unrestricted ? 1 : 0, jobLevel, limit, employeeId, workspaceId),
         );
       }
       await db.batch(statements);

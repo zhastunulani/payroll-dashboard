@@ -18,6 +18,10 @@ export type SalaryRecord = {
   paymentMethodName: string;
   baseSalary: number;
   note: string;
+  smzEnabled: boolean;
+  smzUnrestricted: boolean;
+  jobLevel: number;
+  smzLimit: number;
   components: SalaryComponent[];
   total: number;
   isPaid: boolean;

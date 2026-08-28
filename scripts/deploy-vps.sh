@@ -24,4 +24,11 @@ ssh "${ssh_options[@]}" "${remote}" \
    ln -sfn '${release_dir}' '${DEPLOY_ROOT}/current' && \
    sudo /usr/bin/systemctl restart payroll-dashboard.service && \
    sudo /usr/bin/systemctl is-active --quiet payroll-dashboard.service && \
-   curl --fail --silent --show-error http://127.0.0.1:4300/api/ping"
+   for attempt in {1..30}; do \
+     if curl --fail --silent --show-error http://127.0.0.1:4300/api/ping; then \
+       exit 0; \
+     fi; \
+     sleep 1; \
+   done; \
+   echo 'Payroll health check timed out after 30 seconds.' >&2; \
+   exit 1"

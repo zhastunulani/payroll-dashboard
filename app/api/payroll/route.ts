@@ -13,6 +13,7 @@ import {
 } from "../../../lib/expenses";
 import { EMPTY_DEPARTMENT_IDS_ON_NEW_MONTH } from "../../../lib/months";
 import type { SalaryComponentKind } from "../../../lib/types";
+import { normalizeUnitEconomicsSettings } from "../../../lib/unit-economics";
 
 type ActionBody = {
   action?: string;
@@ -150,6 +151,32 @@ export async function POST(request: Request) {
     const workspace = await db.prepare("SELECT id FROM workspaces WHERE id = ?")
       .bind(workspaceId).first<{ id: string }>();
     if (!workspace) throw new Error("Жоба табылмады.");
+
+    if (action === "saveUnitEconomics") {
+      const selectedPeriod = monthId(body.monthId);
+      const selectedMonth = await resolveMonthId(workspaceId, selectedPeriod);
+      const settings = normalizeUnitEconomicsSettings(body.settings);
+      const validCategories = new Set((
+        await db
+          .prepare("SELECT id FROM expense_categories WHERE workspace_id = ?")
+          .bind(workspaceId)
+          .all<{ id: string }>()
+      ).results.map((category) => category.id));
+      settings.categoryGroups = Object.fromEntries(
+        Object.entries(settings.categoryGroups).filter(([id]) => validCategories.has(id)),
+      );
+      const key = `unit_economics:${workspaceId}:${selectedMonth}`;
+      await db
+        .prepare(
+          `INSERT INTO app_settings (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE
+           SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+        )
+        .bind(key, JSON.stringify(settings))
+        .run();
+      return Response.json(await loadPayrollData(selectedPeriod, workspaceId));
+    }
 
     if (action === "createWorkspace") {
       const name = text(body.name, "Жоба атауы", 80);

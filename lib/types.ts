@@ -69,6 +69,58 @@ export type BreakdownItem = {
   changePercent: number | null;
 };
 
+export type UnitType = "order" | "client" | "product" | "service";
+
+export type UnitCostGroup =
+  | "payroll"
+  | "variable"
+  | "marketing"
+  | "fixed"
+  | "excluded";
+
+export type UnitEconomicsSettings = {
+  unitType: UnitType;
+  revenue: number;
+  unitCount: number;
+  leads: number;
+  acquiredCustomers: number;
+  marketingPeriod: string;
+  marketingSpend: number;
+  marketingSpendUsd: number;
+  payrollTaxes: number;
+  contractorPayments: number;
+  categoryGroups: Record<string, UnitCostGroup>;
+};
+
+export type UnitEconomicsSummary = {
+  payroll: number;
+  variable: number;
+  marketing: number;
+  fixed: number;
+  excluded: number;
+  totalCosts: number;
+  contribution: number;
+  operatingProfit: number;
+  revenuePerUnit: number | null;
+  variablePerUnit: number | null;
+  contributionPerUnit: number | null;
+  customerAcquisitionCost: number | null;
+  costPerLead: number | null;
+  operatingMarginPercent: number | null;
+  breakEvenUnits: number | null;
+};
+
+export type UnitEconomicsData = {
+  settings: UnitEconomicsSettings;
+  summary: UnitEconomicsSummary;
+  categories: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    group: UnitCostGroup;
+  }>;
+};
+
 export type PayrollData = {
   workspaces: WorkspaceSummary[];
   selectedWorkspace: WorkspaceSummary;
@@ -105,4 +157,5 @@ export type PayrollData = {
   previousStats: DashboardStats | null;
   departmentBreakdown: BreakdownItem[];
   expenseBreakdown: BreakdownItem[];
+  unitEconomics: UnitEconomicsData;
 };

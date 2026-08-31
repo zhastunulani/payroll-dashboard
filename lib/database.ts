@@ -9,6 +9,10 @@ import type {
   PayrollData,
   SalaryRecord,
 } from "./types";
+import {
+  computeUnitEconomics,
+  normalizeUnitEconomicsSettings,
+} from "./unit-economics";
 
 type RuntimeEnv = {
   DATABASE_URL?: string;
@@ -583,7 +587,8 @@ export async function loadPayrollData(
   if (!selectedRow) throw new Error("Есептік ай табылмады.");
   const previousRow = monthRows[selectedIndex + 1] ?? null;
 
-  const [salaryRows, expenseRows, previousSalaries, previousExpenses, departmentRows, methodRows, categoryRows] =
+  const unitEconomicsKey = `unit_economics:${selectedWorkspace.id}:${selectedRow.id}`;
+  const [salaryRows, expenseRows, previousSalaries, previousExpenses, departmentRows, methodRows, categoryRows, unitEconomicsRow] =
     await Promise.all([
       loadSalaries(selectedRow.id),
       loadExpenses(selectedRow.id),
@@ -614,7 +619,20 @@ export async function loadPayrollData(
         "SELECT id, name, sort_order, archived_at FROM expense_categories WHERE workspace_id = ? ORDER BY sort_order, name",
         selectedWorkspace.id,
       ),
+      getRawDb()
+        .prepare("SELECT value FROM app_settings WHERE key = ?")
+        .bind(unitEconomicsKey)
+        .first<{ value: string }>(),
     ]);
+
+  let unitEconomicsSettings: unknown = null;
+  if (unitEconomicsRow?.value) {
+    try {
+      unitEconomicsSettings = JSON.parse(unitEconomicsRow.value);
+    } catch {
+      unitEconomicsSettings = null;
+    }
+  }
 
   const departmentNames = new Map(
     salaryRows.map((salary) => [salary.departmentId, salary.departmentName]),
@@ -700,6 +718,11 @@ export async function loadPayrollData(
     expenseBreakdown: buildBreakdown(
       groupedExpenses(expenseRows),
       groupedExpenses(previousExpenses),
+    ),
+    unitEconomics: computeUnitEconomics(
+      salaryRows.reduce((sum, salary) => sum + salary.total, 0),
+      expenseRows,
+      normalizeUnitEconomicsSettings(unitEconomicsSettings),
     ),
   };
 }

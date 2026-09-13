@@ -2,7 +2,7 @@ export default defineNuxtConfig({
   compatibilityDate: "2026-08-01",
   devtools: { enabled: true },
   modules: ["@nuxt/eslint"],
-  css: ["~/assets/css/main.css"],
+  css: ["~/assets/css/main.css", "~/assets/css/finance.css"],
   app: {
     head: {
       htmlAttrs: { lang: "kk" },

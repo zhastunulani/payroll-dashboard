@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Calculator, Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, ShoppingBag, UsersRound, X } from "lucide-vue-next";
+import { Building2, Calculator, Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, ShoppingBag, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const route = useRoute();
 const links = [
+  { to: "/finance", label: "Барлық жоба · Қаржы", short: "Қаржы", icon: Building2 },
   { to: "/", label: "Дашборд", short: "Шолу", icon: LayoutDashboard },
   { to: "/departments", label: "Бөлімдер", short: "Айлық", icon: UsersRound },
   { to: "/expenses", label: "Шығындар", short: "Шығын", icon: ReceiptText },

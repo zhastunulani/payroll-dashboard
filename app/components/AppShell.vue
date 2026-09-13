@@ -2,6 +2,7 @@
 import { X } from "lucide-vue-next";
 
 const payroll = usePayroll();
+const route = useRoute();
 const themeClass = computed(() => {
   const name = payroll.data.value?.selectedWorkspace.name
     .trim()
@@ -15,7 +16,7 @@ const themeClass = computed(() => {
   <div class="app-frame" :class="themeClass">
     <AppNavigation />
     <main class="workspace">
-      <PeriodHeader />
+      <PeriodHeader v-if="route.path !== '/finance'" />
       <div v-if="payroll.error.value" class="global-alert"><span>{{ payroll.error.value }}</span><button type="button" aria-label="Жабу" @click="payroll.error.value = ''"><X :size="17" /></button></div>
       <div v-if="payroll.loading.value" class="page-loading"><i /><span>Деректер жаңартылуда…</span></div>
       <slot />

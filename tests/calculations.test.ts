@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBreakdown, computeStats, monthLabel, salaryTotal } from "../lib/calculations.ts";
+import { buildBreakdown, computeStats, monthLabel, salaryTotal, unpaidSalaryList } from "../lib/calculations.ts";
 import type { ExpenseRecord, SalaryRecord } from "../lib/types.ts";
 
 test("salary total combines base, additions and deductions", () => {
@@ -104,6 +104,36 @@ test("one-time other expenses are immediately counted as spent", () => {
     employeeCount: 0,
     paymentProgress: 100,
   });
+});
+
+test("unpaid salary list includes every department and excludes paid or zero rows", () => {
+  const salary = (overrides: Partial<SalaryRecord>): SalaryRecord => ({
+    id: "salary",
+    employeeId: "employee",
+    employeeName: "Қызметкер",
+    position: "",
+    departmentId: "department",
+    departmentName: "Бөлім",
+    paymentMethodId: "payment",
+    paymentMethodName: "Аударым",
+    baseSalary: 150_000,
+    note: "",
+    components: [],
+    total: 150_000,
+    isPaid: false,
+    paidAt: null,
+    archivedAt: null,
+    ...overrides,
+  });
+
+  const result = unpaidSalaryList([
+    salary({ id: "paid", employeeName: "Төленген", isPaid: true }),
+    salary({ id: "sales", employeeName: "Аружан", departmentName: "Сату бөлімі", total: 220_000 }),
+    salary({ id: "zero", employeeName: "Нөл", total: 0 }),
+    salary({ id: "academy", employeeName: "Дарын", departmentName: "Академ", total: 180_000 }),
+  ]);
+
+  assert.deepEqual(result.map((item) => item.id), ["academy", "sales"]);
 });
 
 test("breakdown compares current and previous month", () => {

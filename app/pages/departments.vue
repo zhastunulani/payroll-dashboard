@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, CheckCircle2, Clock3, MessageSquareText, Pencil, Search, Trash2, UsersRound, X } from "lucide-vue-next";
 import type { SalaryRecord } from "../../lib/types";
+import { unpaidSalaryList } from "../../lib/calculations";
 
 const payroll = usePayroll();
 const { formatMoney } = useFormatters();
@@ -24,6 +25,8 @@ const employees = computed(() => {
   return query ? rows.filter(item => `${item.employeeName} ${item.position} ${item.paymentMethodName}`.toLocaleLowerCase("kk-KZ").includes(query)) : rows;
 });
 const departmentOptions = computed(() => departments.value.map(item => ({ value: item.id, label: item.name, description: `${item.employees.length} қызметкер` })));
+const unpaidSalaries = computed(() => unpaidSalaryList(payroll.data.value?.salaries || []));
+const unpaidTotal = computed(() => unpaidSalaries.value.reduce((sum, item) => sum + item.total, 0));
 const selected = computed(() => department.value?.employees.filter(item => selectedIds.value.has(item.id)) || []);
 const allSelected = computed(() => !!department.value?.employees.length && department.value.employees.every(item => selectedIds.value.has(item.id)));
 
@@ -65,6 +68,23 @@ async function remove(employee: SalaryRecord) {
     <section class="department-picker panel">
       <div class="desktop-department-tabs"><button v-for="item in departments" :key="item.id" type="button" :class="{ active: item.id === selectedDepartment }" @click="selectDepartment(item.id)"><span>{{ item.name }}</span><b>{{ item.employees.length }}</b></button></div>
       <div class="mobile-department-select"><UiSmartSelect :model-value="selectedDepartment" :options="departmentOptions" label="Бөлім" search-placeholder="Бөлімді іздеу" @update:model-value="selectDepartment" /></div>
+    </section>
+
+    <section class="panel payment-queue">
+      <header class="payment-queue-header">
+        <div><span class="eyebrow">Айлық төлемі</span><h2>Төленуі керек</h2><p>Барлық бөлімдегі төленбеген қызметкерлердің нақты төлем сомасы</p></div>
+        <div class="payment-queue-summary"><span><small>Қызметкер</small><strong>{{ unpaidSalaries.length }}</strong></span><span><small>Жалпы сома</small><strong>{{ formatMoney(unpaidTotal) }}</strong></span></div>
+      </header>
+      <div v-if="unpaidSalaries.length" class="payment-queue-list">
+        <article v-for="employee in unpaidSalaries" :key="employee.id">
+          <div class="person"><i>{{ employee.employeeName.slice(0, 1).toUpperCase() }}</i><span><strong>{{ employee.employeeName }}</strong><small>{{ employee.position || "Лауазым көрсетілмеген" }}</small></span></div>
+          <div class="payment-queue-detail"><small>Бөлім</small><strong>{{ employee.departmentName }}</strong></div>
+          <div class="payment-queue-detail"><small>Төлем түрі</small><strong>{{ employee.paymentMethodName }}</strong></div>
+          <div class="payment-queue-amount"><small>Жіберілетін сома</small><strong>{{ formatMoney(employee.total) }}</strong></div>
+          <button type="button" class="payment-queue-done" :disabled="payroll.isPending('toggleSalaryPaid', employee.id)" @click="payroll.mutate('toggleSalaryPaid', { id: employee.id, isPaid: true })"><CheckCircle2 :size="16" />{{ payroll.isPending('toggleSalaryPaid', employee.id) ? "Сақталуда…" : "Төленді" }}</button>
+        </article>
+      </div>
+      <div v-else class="payment-queue-empty"><CheckCircle2 :size="22" /><div><strong>Барлық айлық төленді</strong><span>Бұл айда төленбеген қызметкер қалған жоқ.</span></div></div>
     </section>
 
     <section class="department-kpis">

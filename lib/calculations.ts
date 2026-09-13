@@ -55,6 +55,18 @@ export function computeStats(
   };
 }
 
+export function unpaidSalaryList(salaries: SalaryRecord[]): SalaryRecord[] {
+  return salaries
+    .filter((salary) => !salary.isPaid && salary.total > 0)
+    .sort((left, right) => {
+      const departmentOrder = left.departmentName.localeCompare(
+        right.departmentName,
+        "kk-KZ",
+      );
+      return departmentOrder || left.employeeName.localeCompare(right.employeeName, "kk-KZ");
+    });
+}
+
 export function buildBreakdown(
   current: Array<{ id: string; name: string; amount: number }>,
   previous: Array<{ id: string; name: string; amount: number }>,

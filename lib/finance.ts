@@ -1,56 +1,160 @@
 export const FINANCE_CATEGORIES = {
-  payroll: "Айлық / ФОТ", contractors: "Мердігерлер және контент", marketing: "Маркетинг / таргет",
-  tax: "Салық және аударымдар", rent: "Аренда", services: "Сервистер және байланыс",
-  variable: "Өнімнің тікелей шығыны", office: "Кеңсе және шаруашылық", travel: "Іссапар",
-  events: "Іс-шаралар", equipment: "Жабдық және жиһаз", deposit: "Қайтарылатын депозит",
-  other: "Басқа шығын", revenue: "Табыс",
+  payroll: "Айлық / ФОТ",
+  contractors: "Мердігерлер және контент",
+  marketing: "Маркетинг / таргет",
+  tax: "Салық және аударымдар",
+  rent: "Аренда",
+  services: "Сервистер және байланыс",
+  variable: "Өнімнің тікелей шығыны",
+  office: "Кеңсе және шаруашылық",
+  travel: "Іссапар",
+  events: "Іс-шаралар",
+  equipment: "Жабдық және жиһаз",
+  deposit: "Қайтарылатын депозит",
+  other: "Басқа шығын",
+  revenue: "Табыс",
 } as const;
 export type FinanceCategory = keyof typeof FINANCE_CATEGORIES;
+
+/** Management P&L groups. Every cost category belongs to exactly one group. */
+export const COST_GROUPS = {
+  payroll: "ФОТ",
+  marketing: "Таргет / маркетинг",
+  opex: "Операциялық шығын",
+  tax: "Салық",
+  capex: "Жабдық / депозит",
+} as const;
+export type CostGroup = keyof typeof COST_GROUPS;
+
+const CATEGORY_GROUP: Record<Exclude<FinanceCategory, "revenue">, CostGroup> = {
+  payroll: "payroll",
+  marketing: "marketing",
+  tax: "tax",
+  contractors: "opex",
+  rent: "opex",
+  services: "opex",
+  variable: "opex",
+  office: "opex",
+  travel: "opex",
+  events: "opex",
+  other: "opex",
+  equipment: "capex",
+  deposit: "capex",
+};
+
+/** P&L presentation order: team, acquisition, operations, taxes, then capital below the line. */
+export const PNL_ORDER: Array<Exclude<FinanceCategory, "revenue">> = [
+  "payroll", "contractors", "marketing", "variable", "rent", "services",
+  "office", "travel", "events", "other", "tax", "equipment", "deposit",
+];
+
 export type FinanceEntry = {
-  id: string; workspaceId: string; period: string; name: string; category: FinanceCategory;
-  amount: number | null; basis: "actual" | "plan"; status: "paid" | "unpaid" | "unknown";
-  disposition: "included" | "duplicate" | "review"; source: string; note: string;
-  relatedId: string; origin: "salary" | "expense" | "legacy" | "import" | "manual";
+  id: string;
+  workspaceId: string;
+  period: string;
+  name: string;
+  category: FinanceCategory;
+  amount: number | null;
+  basis: "actual" | "plan";
+  status: "paid" | "unpaid" | "unknown";
+  disposition: "included" | "duplicate" | "review";
+  source: string;
+  note: string;
+  relatedId: string;
+  origin: "salary" | "expense" | "legacy" | "import" | "manual";
   updatedAt: string;
   costBehavior?: "fixed" | "variable";
+  /** Department for payroll rows, expense category for Payroll expenses. */
+  group?: string;
+  /** Original currency data, e.g. an advertising top-up paid in USD. */
+  currency?: "KZT" | "USD";
+  currencyAmount?: number | null;
+  fxRate?: number | null;
 };
+
 export type FinanceMetrics = {
-  revenue: number | null; receipts: number | null; units: number | null;
-  leads: number | null; customers: number | null; unitType: "client" | "order" | "service";
-  marketingAligned: boolean; costsReviewed: boolean; notes: string;
+  revenue: number | null;
+  receipts: number | null;
+  units: number | null;
+  leads: number | null;
+  customers: number | null;
+  retentionMonths: number | null;
+  unitType: "client" | "order" | "service";
+  marketingAligned: boolean;
+  costsReviewed: boolean;
+  notes: string;
 };
 export type FinanceProject = { id: string; name: string };
+
 export const EMPTY_FINANCE_METRICS: FinanceMetrics = {
-  revenue: null, receipts: null, units: null, leads: null, customers: null,
-  unitType: "client", marketingAligned: false, costsReviewed: false, notes: "",
+  revenue: null,
+  receipts: null,
+  units: null,
+  leads: null,
+  customers: null,
+  retentionMonths: null,
+  unitType: "client",
+  marketingAligned: false,
+  costsReviewed: false,
+  notes: "",
 };
-export const isOperatingCost = (category: FinanceCategory) => !["equipment", "deposit", "revenue"].includes(category);
+
+export const isOperatingCost = (category: FinanceCategory) =>
+  !["equipment", "deposit", "revenue"].includes(category);
+
+export function categoryGroup(category: FinanceCategory): CostGroup | null {
+  return category === "revenue" ? null : CATEGORY_GROUP[category];
+}
+
 export function financePeriod(value: unknown): string {
   const period = String(value ?? "");
   if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period)) throw new Error("Есептік ай дұрыс емес.");
   return period;
 }
+
+/** Calendar months ending at `period`, oldest first. */
+export function periodWindow(period: string, count: number): string[] {
+  const [year, month] = financePeriod(period).split("-").map(Number);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year!, month! - 1 - (count - 1 - index), 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
 export function optionalAmount(value: unknown, count = false): number | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string" && typeof value !== "number") throw new Error("Сома дұрыс емес.");
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 0 || n > 999_999_999_999 || (count && !Number.isInteger(n))) throw new Error("Сома немесе сан дұрыс емес.");
+  if (!Number.isFinite(n) || n < 0 || n > 999_999_999_999 || (count && !Number.isInteger(n))) {
+    throw new Error("Сома немесе сан дұрыс емес.");
+  }
   return Math.round(n * 100) / 100;
 }
+
 function cleanText(value: unknown, max: number): string {
   const s = String(value ?? "").trim();
   if (s.length > max) throw new Error("Мәтін тым ұзын.");
   return s;
 }
+
 export function normalizeFinanceMetrics(input: Partial<FinanceMetrics>): FinanceMetrics {
   return {
-    revenue: optionalAmount(input.revenue), receipts: optionalAmount(input.receipts),
-    units: optionalAmount(input.units, true), leads: optionalAmount(input.leads, true), customers: optionalAmount(input.customers, true),
+    revenue: optionalAmount(input.revenue),
+    receipts: optionalAmount(input.receipts),
+    units: optionalAmount(input.units, true),
+    leads: optionalAmount(input.leads, true),
+    customers: optionalAmount(input.customers, true),
+    retentionMonths: optionalAmount(input.retentionMonths),
     unitType: input.unitType === "order" || input.unitType === "service" ? input.unitType : "client",
-    marketingAligned: input.marketingAligned === true, costsReviewed: input.costsReviewed === true, notes: cleanText(input.notes, 1200),
+    marketingAligned: input.marketingAligned === true,
+    costsReviewed: input.costsReviewed === true,
+    notes: cleanText(input.notes, 1200),
   };
 }
-export function normalizeFinanceEntry(input: Partial<FinanceEntry>): Omit<FinanceEntry, "id" | "origin" | "updatedAt"> {
+
+export type NormalizedFinanceEntry = Omit<FinanceEntry, "id" | "origin" | "updatedAt" | "costBehavior" | "group">;
+
+export function normalizeFinanceEntry(input: Partial<FinanceEntry>): NormalizedFinanceEntry {
   const category = String(input.category) as FinanceCategory;
   if (!Object.hasOwn(FINANCE_CATEGORIES, category)) throw new Error("Категория дұрыс емес.");
   const name = cleanText(input.name, 200), workspaceId = cleanText(input.workspaceId, 120);
@@ -58,12 +162,34 @@ export function normalizeFinanceEntry(input: Partial<FinanceEntry>): Omit<Financ
   if (!["actual", "plan"].includes(String(input.basis))) throw new Error("Факт немесе жоспарды таңдаңыз.");
   if (!["paid", "unpaid", "unknown"].includes(String(input.status))) throw new Error("Төлем күйі дұрыс емес.");
   if (!["included", "duplicate", "review"].includes(String(input.disposition))) throw new Error("Есепке қосылу күйі дұрыс емес.");
+  let amount = optionalAmount(input.amount);
+  let currency: "KZT" | "USD" = "KZT", currencyAmount: number | null = null, fxRate: number | null = null;
+  if (input.currency === "USD") {
+    currency = "USD";
+    currencyAmount = optionalAmount(input.currencyAmount);
+    fxRate = optionalAmount(input.fxRate);
+    if (!currencyAmount || !fxRate) throw new Error("USD сомасы мен бағамын толтырыңыз.");
+    // The tenge amount is always derived, so the ledger never disagrees with its own FX inputs.
+    amount = Math.round(currencyAmount * fxRate * 100) / 100;
+  }
   return {
-    workspaceId, period: financePeriod(input.period), name, category, amount: optionalAmount(input.amount),
-    basis: input.basis!, status: input.status!, disposition: input.disposition!,
-    source: cleanText(input.source, 1000), note: cleanText(input.note, 3000), relatedId: cleanText(input.relatedId, 200),
+    workspaceId,
+    period: financePeriod(input.period),
+    name,
+    category,
+    amount,
+    basis: input.basis!,
+    status: input.status!,
+    disposition: input.disposition!,
+    source: cleanText(input.source, 1000),
+    note: cleanText(input.note, 3000),
+    relatedId: cleanText(input.relatedId, 200),
+    currency,
+    currencyAmount,
+    fxRate,
   };
 }
+
 export function classifyFinanceCost(name: string, category = ""): FinanceCategory {
   const value = `${name} ${category}`.toLocaleLowerCase();
   if (/депозит/.test(value)) return "deposit";
@@ -79,59 +205,265 @@ export function classifyFinanceCost(name: string, category = ""): FinanceCategor
   if (/жуу|убор|тазалық|кеңсе|канц|конц|бумаг|офис|распечат|шаруашылық/.test(value)) return "office";
   return "other";
 }
+
 const sum = (values: number[]) => Math.round(values.reduce((a, b) => a + Math.round(b * 100), 0)) / 100;
+const ratio = (value: number | null, divisor: number | null) =>
+  value === null || divisor === null || divisor <= 0 ? null : value / divisor;
+
+export type CategoryLine = {
+  key: Exclude<FinanceCategory, "revenue">;
+  name: string;
+  group: CostGroup;
+  amount: number | null;
+  paid: number;
+  plan: number | null;
+  count: number;
+};
+
+export type FinanceSummary = ReturnType<typeof summarizeFinance>;
+
 export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetrics) {
   const included = entries.filter(e => e.disposition === "included" && e.amount !== null);
   const actual = included.filter(e => e.basis === "actual" && e.category !== "revenue");
   const planned = included.filter(e => e.basis === "plan" && e.category !== "revenue");
-  const cost = sum(actual.map(e => e.amount!));
-  const operating = sum(actual.filter(e => isOperatingCost(e.category)).map(e => e.amount!));
-  const capital = sum(actual.filter(e => !isOperatingCost(e.category)).map(e => e.amount!));
-  const paid = sum(actual.filter(e => e.status === "paid").map(e => e.amount!));
-  const unpaid = sum(actual.filter(e => e.status === "unpaid").map(e => e.amount!));
-  const unknown = sum(actual.filter(e => e.status === "unknown").map(e => e.amount!));
+  const amountOf = (rows: FinanceEntry[]) => sum(rows.map(e => e.amount!));
+  const cost = amountOf(actual);
+  const operating = amountOf(actual.filter(e => isOperatingCost(e.category)));
+  const capital = amountOf(actual.filter(e => !isOperatingCost(e.category)));
+  const paid = amountOf(actual.filter(e => e.status === "paid"));
+  const unpaid = amountOf(actual.filter(e => e.status === "unpaid"));
+  const unknown = amountOf(actual.filter(e => e.status === "unknown"));
   const marketingRows = actual.filter(e => e.category === "marketing");
-  const marketing = marketingRows.length ? sum(marketingRows.map(e => e.amount!)) : null;
+  const marketing = marketingRows.length ? amountOf(marketingRows) : null;
   const taxRows = actual.filter(e => e.category === "tax");
-  const tax = taxRows.length ? sum(taxRows.map(e => e.amount!)) : null;
-  const variable = sum(actual.filter(e => isOperatingCost(e.category) && e.category !== "marketing" && (e.costBehavior === "variable" || (!e.costBehavior && e.category === "variable"))).map(e => e.amount!));
+  const tax = taxRows.length ? amountOf(taxRows) : null;
+  const variable = amountOf(actual.filter(e =>
+    isOperatingCost(e.category) && e.category !== "marketing"
+    && (e.costBehavior === "variable" || (!e.costBehavior && e.category === "variable"))));
   const revenueRows = included.filter(e => e.category === "revenue" && e.basis === "actual");
   // Revenue is owned by the commercial metrics form. Ledger revenue is a fallback for imported ledgers.
-  const revenue = metrics.revenue ?? (revenueRows.length ? sum(revenueRows.map(e => e.amount!)) : null);
+  const revenue = metrics.revenue ?? (revenueRows.length ? amountOf(revenueRows) : null);
   const profit = revenue === null ? null : sum([revenue, -operating]);
-  const contribution = revenue === null ? null : sum([revenue, -variable, -(marketing ?? 0)]);
-  const units = metrics.units;
-  const plan = planned.length ? sum(planned.map(e => e.amount!)) : null;
-  const categories = (Object.keys(FINANCE_CATEGORIES) as FinanceCategory[]).filter(k => k !== "revenue").map(key => {
+  const plan = planned.length ? amountOf(planned) : null;
+
+  const groups = Object.fromEntries((Object.keys(COST_GROUPS) as CostGroup[])
+    .map(group => [group, amountOf(actual.filter(e => categoryGroup(e.category) === group))])) as Record<CostGroup, number>;
+
+  const categories: CategoryLine[] = PNL_ORDER.map(key => {
     const rows = actual.filter(e => e.category === key);
     const plans = planned.filter(e => e.category === key);
-    return { key, name: FINANCE_CATEGORIES[key], amount: rows.length ? sum(rows.map(e => e.amount!)) : null,
-      paid: sum(rows.filter(e => e.status === "paid").map(e => e.amount!)),
-      plan: plans.length ? sum(plans.map(e => e.amount!)) : null };
-  }).filter(c => c.amount !== null || c.plan !== null).sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
+    return {
+      key,
+      name: FINANCE_CATEGORIES[key],
+      group: CATEGORY_GROUP[key],
+      amount: rows.length ? amountOf(rows) : null,
+      paid: amountOf(rows.filter(e => e.status === "paid")),
+      plan: plans.length ? amountOf(plans) : null,
+      count: rows.length,
+    };
+  }).filter(c => c.amount !== null || c.plan !== null);
+
+  // Payroll: salary rows carry the settled amount; advance rows are the already-deducted part of the same accrual.
+  const salaryRows = actual.filter(e => e.category === "payroll" && e.origin === "salary" && e.id.startsWith("salary:"));
+  const advanceRows = actual.filter(e => e.category === "payroll" && e.id.startsWith("advance:"));
+  const staff = salaryRows.filter(e => e.amount! > 0);
+  const departments = new Map<string, { name: string; amount: number; headcount: number; paid: number; unpaid: number }>();
+  for (const row of [...salaryRows, ...advanceRows]) {
+    const name = row.group || "Бөлімсіз";
+    const item = departments.get(name) ?? { name, amount: 0, headcount: 0, paid: 0, unpaid: 0 };
+    item.amount = sum([item.amount, row.amount!]);
+    if (row.id.startsWith("salary:") && row.amount! > 0) item.headcount += 1;
+    if (row.status === "paid") item.paid = sum([item.paid, row.amount!]);
+    if (row.status === "unpaid") item.unpaid = sum([item.unpaid, row.amount!]);
+    departments.set(name, item);
+  }
+  const payroll = {
+    total: groups.payroll,
+    salaries: amountOf(salaryRows),
+    advances: amountOf(advanceRows),
+    other: sum([groups.payroll, -amountOf(salaryRows), -amountOf(advanceRows)]),
+    headcount: staff.length,
+    average: staff.length ? amountOf(staff) / staff.length : null,
+    paid: amountOf(salaryRows.filter(e => e.status === "paid")),
+    unpaid: amountOf(salaryRows.filter(e => e.status === "unpaid")),
+    unpaidPeople: salaryRows.filter(e => e.status === "unpaid" && e.amount! > 0).length,
+    departments: [...departments.values()].sort((a, b) => b.amount - a.amount),
+  };
+
+  const usdRows = marketingRows.filter(e => e.currency === "USD" && e.currencyAmount);
+  const leads = metrics.leads, customers = metrics.customers, units = metrics.units;
+  const funnel = {
+    spend: marketing,
+    spendUsd: usdRows.length ? sum(usdRows.map(e => e.currencyAmount!)) : null,
+    leads,
+    customers,
+    cpl: ratio(marketing, leads),
+    cac: ratio(marketing, customers),
+    conversion: ratio(customers, leads),
+    confirmed: metrics.marketingAligned,
+  };
+
+  const arpu = ratio(revenue, units);
+  const variablePerUnit = ratio(variable, units);
+  const contributionPerUnit = arpu === null || variablePerUnit === null ? null : arpu - variablePerUnit;
+  const ltv = contributionPerUnit !== null && metrics.retentionMonths ? contributionPerUnit * metrics.retentionMonths : null;
+  const romiBase = ltv ?? contributionPerUnit;
+  const unit = {
+    units,
+    unitType: metrics.unitType,
+    arpu,
+    costPerUnit: ratio(operating, units),
+    payrollPerUnit: ratio(groups.payroll, units),
+    variablePerUnit,
+    contributionPerUnit,
+    profitPerUnit: ratio(profit, units),
+    ltv,
+    ltvCac: ltv !== null && funnel.cac ? ltv / funnel.cac : null,
+    paybackMonths: funnel.cac !== null && contributionPerUnit !== null && contributionPerUnit > 0 ? funnel.cac / contributionPerUnit : null,
+    breakEvenUnits: contributionPerUnit !== null && contributionPerUnit > 0 ? Math.ceil(sum([operating, -variable]) / contributionPerUnit) : null,
+    romi: marketing && customers !== null && romiBase !== null ? (customers * romiBase - marketing) / marketing : null,
+    romiBasis: ltv !== null ? "ltv" as const : "month" as const,
+    confirmed: metrics.costsReviewed,
+  };
+
   return {
-    cost, operating, capital, paid, unpaid, unknown, revenue, profit, tax, marketing, plan,
-    revenueRecorded: revenue !== null, categories,
+    cost, operating, capital, paid, unpaid, unknown, revenue, profit, tax, marketing, plan, variable,
+    revenueRecorded: revenue !== null,
+    groups,
+    categories,
+    payroll,
+    funnel,
+    unit,
     cashNet: metrics.receipts === null ? null : sum([metrics.receipts, -paid]),
     margin: profit !== null && revenue! > 0 ? profit / revenue! : null,
-    unitCost: units !== null && units > 0 ? operating / units : null,
-    unitRevenue: units !== null && units > 0 && revenue !== null ? revenue / units : null,
-    unitContribution: metrics.costsReviewed && units !== null && units > 0 && contribution !== null ? contribution / units : null,
-    cpl: metrics.marketingAligned && marketing !== null && metrics.leads !== null && metrics.leads > 0 ? marketing / metrics.leads : null,
-    cac: metrics.marketingAligned && marketing !== null && metrics.customers !== null && metrics.customers > 0 ? marketing / metrics.customers : null,
-    breakEvenUnits: metrics.costsReviewed && units && units > 0 && contribution !== null && contribution > 0 ? Math.ceil((operating - variable - (marketing ?? 0)) / (contribution / units)) : null,
+    payrollShare: ratio(groups.payroll, revenue),
+    marketingShare: ratio(marketing, revenue),
+    // Kept for existing callers: the same values as the grouped objects above.
+    unitCost: unit.costPerUnit,
+    unitRevenue: unit.arpu,
+    unitContribution: unit.contributionPerUnit,
+    cpl: funnel.cpl,
+    cac: funnel.cac,
+    breakEvenUnits: unit.breakEvenUnits,
     missingAmounts: entries.filter(e => e.disposition === "included" && e.amount === null).length,
     review: entries.filter(e => e.disposition === "review").length,
     duplicates: entries.filter(e => e.disposition === "duplicate").length,
+    otherCount: actual.filter(e => e.category === "other").length,
   };
 }
+
 export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; metrics: FinanceMetrics }>) {
   const summaries = projects.map(p => summarizeFinance(p.entries, p.metrics));
   const total = summarizeFinance(projects.flatMap(p => p.entries), EMPTY_FINANCE_METRICS);
   const revenueComplete = summaries.length > 0 && summaries.every(s => s.revenue !== null);
-  return { ...total, revenue: revenueComplete ? sum(summaries.map(s => s.revenue!)) : null,
-    profit: revenueComplete ? sum(summaries.map(s => s.profit!)) : null,
-    revenueRecorded: revenueComplete, revenueCoverage: summaries.filter(s => s.revenue !== null).length,
-    margin: null, unitCost: null, unitRevenue: null, unitContribution: null, cac: null, cpl: null, breakEvenUnits: null,
-    cashNet: projects.length && projects.every(p => p.metrics.receipts !== null) ? sum(summaries.map(s => s.cashNet!)) : null };
+  const revenue = revenueComplete ? sum(summaries.map(s => s.revenue!)) : null;
+  const profit = revenueComplete ? sum(summaries.map(s => s.profit!)) : null;
+  // Leads can be pooled only if every project that spends on marketing also reports its funnel.
+  const spenders = summaries.filter(s => s.marketing);
+  const funnelComplete = spenders.length > 0 && spenders.every(s => s.funnel.leads !== null && s.funnel.customers !== null);
+  const leads = funnelComplete ? sum(summaries.map(s => s.funnel.leads ?? 0)) : null;
+  const customers = funnelComplete ? sum(summaries.map(s => s.funnel.customers ?? 0)) : null;
+  return {
+    ...total,
+    revenue,
+    profit,
+    revenueRecorded: revenueComplete,
+    revenueCoverage: summaries.filter(s => s.revenue !== null).length,
+    margin: profit !== null && revenue! > 0 ? profit / revenue! : null,
+    payrollShare: ratio(total.groups.payroll, revenue),
+    marketingShare: ratio(total.marketing, revenue),
+    funnel: {
+      ...total.funnel,
+      leads,
+      customers,
+      cpl: ratio(total.marketing, leads),
+      cac: ratio(total.marketing, customers),
+      conversion: ratio(customers, leads),
+    },
+    // Different projects count different units; pooling them would be meaningless.
+    unitCost: null, unitRevenue: null, unitContribution: null, cac: null, cpl: null, breakEvenUnits: null,
+    cashNet: projects.length && projects.every(p => p.metrics.receipts !== null) ? sum(summaries.map(s => s.cashNet!)) : null,
+  };
+}
+
+/** A small per-month record for trend charts and month-over-month comparisons. */
+export type FinanceTrendPoint = {
+  period: string;
+  cost: number;
+  operating: number;
+  capital: number;
+  groups: Record<CostGroup, number>;
+  categories: Partial<Record<FinanceCategory, number>>;
+  revenue: number | null;
+  profit: number | null;
+  paid: number;
+  unpaid: number;
+  unknown: number;
+  plan: number | null;
+  headcount: number;
+  leads: number | null;
+  customers: number | null;
+  units: number | null;
+  cac: number | null;
+  cpl: number | null;
+  hasData: boolean;
+};
+
+export function trendPoint(period: string, entries: FinanceEntry[], metrics: FinanceMetrics): FinanceTrendPoint {
+  const s = summarizeFinance(entries, metrics);
+  return {
+    period,
+    cost: s.cost,
+    operating: s.operating,
+    capital: s.capital,
+    groups: s.groups,
+    categories: Object.fromEntries(s.categories.filter(c => c.amount !== null).map(c => [c.key, c.amount!])),
+    revenue: s.revenue,
+    profit: s.profit,
+    paid: s.paid,
+    unpaid: s.unpaid,
+    unknown: s.unknown,
+    plan: s.plan,
+    headcount: s.payroll.headcount,
+    leads: metrics.leads,
+    customers: metrics.customers,
+    units: metrics.units,
+    cac: s.funnel.cac,
+    cpl: s.funnel.cpl,
+    hasData: s.cost > 0 || s.revenue !== null || s.plan !== null,
+  };
+}
+
+export type FinanceIssue = {
+  level: "critical" | "warning" | "info";
+  code: string;
+  text: string;
+  amount?: number;
+};
+
+/** Data-quality checklist for one project-month: what blocks a reliable P&L and unit economics. */
+export function financeIssues(summary: FinanceSummary, metrics: FinanceMetrics, opts: { payrollMonth: boolean; closed: boolean }): FinanceIssue[] {
+  const issues: FinanceIssue[] = [];
+  if (!opts.payrollMonth) issues.push({ level: "info", code: "no-payroll-month", text: "Payroll-да бұл ай ашылмаған: айлық пен тұрақты шығын жоқ." });
+  if (summary.revenue === null) issues.push({ level: "critical", code: "no-revenue", text: "Табыс енгізілмеген — пайда, маржа және юнит есептелмейді." });
+  if (summary.payroll.unpaid > 0) {
+    issues.push({
+      level: opts.closed ? "critical" : "warning",
+      code: "unpaid-salary",
+      text: `${summary.payroll.unpaidPeople} адамның айлығы төленбеген`,
+      amount: summary.payroll.unpaid,
+    });
+  }
+  const otherUnpaid = sum([summary.unpaid, -summary.payroll.unpaid]);
+  if (otherUnpaid > 0) issues.push({ level: "warning", code: "unpaid-expense", text: "Төленбеген шығындар бар", amount: otherUnpaid });
+  if (summary.marketing && metrics.leads === null) issues.push({ level: "warning", code: "no-leads", text: "Таргет шығыны бар, бірақ лид саны енгізілмеген — CPL белгісіз." });
+  if (summary.marketing && metrics.customers === null) issues.push({ level: "warning", code: "no-customers", text: "Жаңа ақылы клиенттер саны жоқ — CAC белгісіз." });
+  if (!summary.marketing && metrics.leads) issues.push({ level: "warning", code: "leads-without-spend", text: "Лидтер бар, бірақ таргет шығыны тіркелмеген." });
+  if (summary.revenue !== null && metrics.units === null) issues.push({ level: "warning", code: "no-units", text: "Оқушы / клиент саны жоқ — ARPU және юнит маржасы есептелмейді." });
+  if (summary.tax === null && summary.groups.payroll > 0) issues.push({ level: "info", code: "no-tax", text: "Салық пен аударымдар енгізілмеген — нәтиже салыққа дейін." });
+  if (summary.unknown > 0) issues.push({ level: "info", code: "unknown-status", text: "Төлем күйі расталмаған сомалар", amount: summary.unknown });
+  if (summary.review > 0) issues.push({ level: "warning", code: "review", text: `${summary.review} жазба нақтылауды күтіп тұр (жиынға кірмейді).` });
+  if (summary.missingAmounts > 0) issues.push({ level: "warning", code: "missing-amount", text: `${summary.missingAmounts} жазбаның сомасы жоқ.` });
+  if (summary.otherCount > 0) issues.push({ level: "info", code: "other-category", text: `${summary.otherCount} жазба «Басқа шығын» санатында — жіктеу ұсынылады.` });
+  return issues;
 }

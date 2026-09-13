@@ -1,166 +1,198 @@
 <script setup lang="ts">
-import {
-  Calculator,
-  CircleDollarSign,
-  PiggyBank,
-  Save,
-  Target,
-  TrendingDown,
-  TrendingUp,
-  UsersRound,
-  WalletCards,
-} from "lucide-vue-next";
-import { computeUnitEconomics } from "../../lib/unit-economics";
-import type {
-  UnitCostGroup,
-  UnitEconomicsSettings,
-  UnitType,
-} from "../../lib/types";
+import { CirclePlus, RefreshCw, Save } from "lucide-vue-next";
+import { EMPTY_FINANCE_METRICS, type FinanceEntry, type FinanceMetrics, type FinanceSummary } from "../../lib/finance";
 
-const payroll = usePayroll();
-const { formatMoney } = useFormatters();
-const saved = ref(false);
-const draft = reactive<UnitEconomicsSettings>({
-  unitType: "order",
-  revenue: 0,
-  unitCount: 0,
-  leads: 0,
-  acquiredCustomers: 0,
-  marketingPeriod: "",
-  marketingSpend: 0,
-  marketingSpendUsd: 0,
-  payrollTaxes: 0,
-  contractorPayments: 0,
-  categoryGroups: {},
-});
+const route = useRoute();
+const finance = useFinance();
+const { projects, summaries, total, period } = finance;
+onMounted(finance.load);
 
-const unitTypes: Array<{ value: UnitType; label: string; one: string }> = [
-  { value: "order", label: "Тапсырыс", one: "тапсырыс" },
-  { value: "client", label: "Клиент", one: "клиент" },
-  { value: "product", label: "Тауар", one: "тауар" },
-  { value: "service", label: "Қызмет", one: "қызмет" },
-];
-const costGroups: Array<{ value: UnitCostGroup; label: string }> = [
-  { value: "payroll", label: "ФОТ / команда" },
-  { value: "variable", label: "Айнымалы шығын" },
-  { value: "marketing", label: "Маркетинг" },
-  { value: "fixed", label: "Тұрақты шығын" },
-  { value: "excluded", label: "Есепке қоспау" },
-];
+const focus = typeof route.query.project === "string" ? route.query.project : "";
+const drafts = reactive<Record<string, FinanceMetrics>>({});
+const saving = reactive<Record<string, boolean>>({});
+const messages = reactive<Record<string, { ok: boolean; text: string } | undefined>>({});
+const entryDraft = ref<Partial<FinanceEntry> | null>(null);
 
-const dataKey = computed(() => {
-  const data = payroll.data.value;
-  return data ? `${data.selectedWorkspace.id}:${data.selectedMonth.id}` : "";
-});
-
-watch(dataKey, () => {
-  const settings = payroll.data.value?.unitEconomics.settings;
-  if (!settings) return;
-  Object.assign(draft, JSON.parse(JSON.stringify(settings)));
-  saved.value = false;
-}, { immediate: true });
-
-const result = computed(() => {
-  const data = payroll.data.value;
-  if (!data) return null;
-  return computeUnitEconomics(data.stats.salaryTotal, data.expenses, draft);
-});
-const unitLabel = computed(() => unitTypes.find((item) => item.value === draft.unitType)?.one ?? "бірлік");
-const ready = computed(() => draft.revenue > 0 && draft.unitCount > 0);
-
-function metric(value: number | null): string {
-  return value === null ? "—" : formatMoney(value);
-}
-
-async function save() {
-  saved.value = false;
-  if (await payroll.mutate("saveUnitEconomics", {
-    settings: JSON.parse(JSON.stringify(draft)),
-  })) {
-    saved.value = true;
-    window.setTimeout(() => { saved.value = false; }, 2500);
+// Fresh data replaces a form only when the month changed or the form has no unsaved edits,
+// so saving one project never discards what was typed in another.
+const baselines: Record<string, string> = {};
+let loadedPeriod = "";
+watch(() => finance.data.value, data => {
+  if (!data) return;
+  const monthChanged = data.period !== loadedPeriod;
+  loadedPeriod = data.period;
+  for (const p of data.projects) {
+    const next = { ...EMPTY_FINANCE_METRICS, ...data.metrics[p.id] };
+    if (monthChanged || !drafts[p.id] || JSON.stringify(drafts[p.id]) === baselines[p.id]) {
+      drafts[p.id] = next;
+      if (monthChanged) messages[p.id] = undefined;
+    }
+    baselines[p.id] = JSON.stringify(next);
   }
+}, { immediate: true });
+onMounted(() => {
+  if (focus) nextTick(() => document.getElementById(`metrics-${focus}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+});
+
+const fields: Array<{ key: keyof FinanceMetrics; label: string; hint: string; money?: boolean; step?: string }> = [
+  { key: "revenue", label: "Табыс, ₸", hint: "Осы айда танылған (есептелген) табыс", money: true },
+  { key: "receipts", label: "Түскен ақша, ₸", hint: "Шотқа нақты түскен сома", money: true },
+  { key: "units", label: "Оқушы / клиент саны", hint: "Осы айда белсенді, ақы төлейтін", step: "1" },
+  { key: "leads", label: "Лидтер", hint: "Таргет пен басқа арналардан", step: "1" },
+  { key: "customers", label: "Жаңа ақылы клиенттер", hint: "Осы айда алғаш төлегендер", step: "1" },
+  { key: "retentionMonths", label: "Клиент орташа неше ай оқиды", hint: "LTV үшін, мысалы 6", step: "0.1" },
+];
+const dirty = (id: string) => JSON.stringify(drafts[id]) !== JSON.stringify({ ...EMPTY_FINANCE_METRICS, ...finance.metricsOf(id) });
+const previousOf = (id: string) => finance.previousOf(id);
+
+async function save(id: string) {
+  const draft = drafts[id];
+  if (!draft) return;
+  saving[id] = true;
+  // Inputs bound to number fields return "" when cleared; the server treats empty as "not reported".
+  const error = await finance.saveMetrics(id, { ...draft });
+  saving[id] = false;
+  if (!error) drafts[id] = { ...EMPTY_FINANCE_METRICS, ...finance.metricsOf(id) };
+  messages[id] = error ? { ok: false, text: error } : { ok: true, text: "Сақталды — барлық есеп жаңартылды." };
 }
+function addTarget(workspaceId: string) {
+  entryDraft.value = { workspaceId, period: period.value, name: "Таргет", category: "marketing", amount: null, basis: "actual", status: "paid", disposition: "included", source: "Жарнама кабинеті", note: "", relatedId: "", currency: "USD" };
+}
+
+type Row = { label: string; hint?: string; value: (s: FinanceSummary, id: string | null) => string; tone?: (s: FinanceSummary) => string };
+const unitLabel = (id: string) => ({ client: "оқушы", order: "тапсырыс", service: "қызмет" })[finance.metricsOf(id).unitType];
+const unitRows: Row[] = [
+  { label: "Табыс", value: s => money(s.revenue) },
+  { label: "Оқушы / клиент саны", value: (s, id) => s.unit.units === null ? "—" : `${formatCount(s.unit.units)} ${id ? unitLabel(id) : ""}` },
+  { label: "ARPU — бір оқушы табысы", hint: "Табыс ÷ оқушы саны", value: s => money(s.unit.arpu) },
+  { label: "Бір оқушы үшін шығын", hint: "Операциялық шығын ÷ оқушы", value: s => money(s.unit.costPerUnit) },
+  { label: "ФОТ бір оқушы үшін", value: s => money(s.unit.payrollPerUnit) },
+  { label: "Юнит маржасы", hint: "ARPU − айнымалы шығын", value: s => money(s.unit.contributionPerUnit) },
+  { label: "Бір оқушы пайдасы", hint: "Нәтиже ÷ оқушы", value: s => money(s.unit.profitPerUnit), tone: s => (s.unit.profitPerUnit ?? 0) < 0 ? "negative" : "" },
+  { label: "LTV", hint: "Юнит маржасы × оқу мерзімі", value: s => money(s.unit.ltv) },
+  { label: "CAC", hint: "Маркетинг ÷ жаңа клиент", value: s => money(s.funnel.cac) },
+  { label: "LTV / CAC", hint: "3× және жоғары — сау", value: s => s.unit.ltvCac === null ? "—" : `${formatCount(s.unit.ltvCac, 1)}×`, tone: s => s.unit.ltvCac === null ? "" : s.unit.ltvCac < 1 ? "negative" : s.unit.ltvCac < 3 ? "warn" : "positive" },
+  { label: "CAC өтелу мерзімі", hint: "CAC ÷ юнит маржасы", value: s => s.unit.paybackMonths === null ? "—" : `${formatCount(s.unit.paybackMonths, 1)} ай` },
+  { label: "Залалсыздық нүктесі", hint: "Тұрақты шығынды жабатын оқушы саны", value: s => s.unit.breakEvenUnits === null ? "—" : formatCount(s.unit.breakEvenUnits) },
+  { label: "Операциялық маржа", value: s => formatPercent(s.margin), tone: s => (s.margin ?? 0) < 0 ? "negative" : "" },
+];
+const funnelRows: Row[] = [
+  { label: "Таргет шығыны, ₸", value: s => money(s.funnel.spend) },
+  { label: "Оның ішінде USD", value: s => s.funnel.spendUsd === null ? "—" : `$ ${formatCount(s.funnel.spendUsd, 2)}` },
+  { label: "Лидтер", value: s => formatCount(s.funnel.leads) },
+  { label: "Жаңа ақылы клиенттер", value: s => formatCount(s.funnel.customers) },
+  { label: "Лид → клиент конверсиясы", value: s => formatPercent(s.funnel.conversion) },
+  { label: "CPL — бір лид құны", value: s => money(s.funnel.cpl) },
+  { label: "CAC — бір клиент құны", value: s => money(s.funnel.cac) },
+  { label: "ROMI", hint: "LTV бар болса LTV бойынша, әйтпесе 1 ай", value: (s, id) => id ? formatPercent(s.unit.romi, 0) : "—", tone: s => s.unit.romi === null ? "" : s.unit.romi < 0 ? "negative" : "positive" },
+  { label: "Маркетинг / табыс", value: s => formatPercent(s.marketingShare) },
+];
+
+const chart = computed(() => {
+  const window = finance.data.value?.window ?? [];
+  return {
+    labels: window.map(p => periodLabel(p, true)),
+    details: window.map(p => periodLabel(p)),
+    series: projects.value.map(p => ({ key: p.id, label: p.name, color: finance.colorOf(p.id), values: finance.trendOf(p.id).map(t => t.hasData ? t.groups.marketing : null) })),
+  };
+});
 </script>
 
 <template>
-  <div v-if="payroll.data.value && result" class="page unit-page">
-    <section class="unit-hero">
+  <div class="analytics-page">
+    <header class="analytics-header">
       <div>
-        <span class="eyebrow light">{{ payroll.data.value.selectedMonth.label }} · {{ payroll.data.value.selectedWorkspace.name }}</span>
-        <h2>Бір {{ unitLabel }} қанша пайда әкеледі?</h2>
-        <p>Табыс − айнымалы шығын − клиент тарту құны = тұрақты шығын мен пайданы жабатын үлес.</p>
+        <span class="eyebrow">Бизнес-модель</span>
+        <h1>Юнит-экономика және таргет</h1>
+        <p>Бір оқушы қанша әкеледі, қаншаға тартылады және қашан өтеледі</p>
       </div>
-      <div class="unit-hero-result" :class="{ negative: result.summary.operatingProfit < 0 }">
-        <small>Айдың таза нәтижесі</small>
-        <strong>{{ formatMoney(result.summary.operatingProfit) }}</strong>
-        <span v-if="result.summary.operatingMarginPercent !== null">Маржа {{ result.summary.operatingMarginPercent }}%</span>
-        <span v-else>Табысты енгізіңіз</span>
+      <div class="analytics-actions">
+        <FinancePeriodControl />
+        <button class="button secondary icon-only" type="button" aria-label="Жаңарту" :disabled="finance.loading.value" @click="finance.load"><RefreshCw :size="17" :class="{ spin: finance.loading.value }" /></button>
       </div>
-    </section>
+    </header>
 
-    <section class="panel unit-input-panel">
-      <header class="panel-header">
-        <div><span class="eyebrow">Есеп негізі</span><h2>Табыс пен сату көлемі</h2><p>Сайтта жоқ үш көрсеткішті толтырыңыз</p></div>
-        <button class="button primary" type="button" :disabled="payroll.saving.value" @click="save"><Save :size="17" /> {{ payroll.saving.value ? "Сақталуда…" : saved ? "Сақталды" : "Сақтау" }}</button>
-      </header>
-      <div class="unit-input-grid">
-        <label class="form-field"><span>Есеп бірлігі</span><select v-model="draft.unitType"><option v-for="item in unitTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-        <label class="form-field"><span>Айлық табыс</span><div class="money-input"><input v-model.number="draft.revenue" type="number" min="0" step="1" /><b>₸</b></div></label>
-        <label class="form-field"><span>{{ unitTypes.find(item => item.value === draft.unitType)?.label }} саны</span><input v-model.number="draft.unitCount" type="number" min="0" step="1" /></label>
-        <label class="form-field"><span>Жаңа клиенттер саны</span><input v-model.number="draft.acquiredCustomers" type="number" min="0" step="1" /></label>
-        <label class="form-field"><span>Салықтар мен аударымдар</span><div class="money-input"><input v-model.number="draft.payrollTaxes" type="number" min="0" step="1" /><b>₸</b></div></label>
-        <label class="form-field"><span>Подрядчиктер төлемі</span><div class="money-input"><input v-model.number="draft.contractorPayments" type="number" min="0" step="1" /><b>₸</b></div></label>
-      </div>
-      <div class="unit-marketing-heading"><div><span class="eyebrow">Маркетинг воронкасы</span><h3>Таргет және лидтер</h3></div><span v-if="draft.marketingSpendUsd">Дерек: ${{ draft.marketingSpendUsd.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span></div>
-      <div class="unit-input-grid marketing">
-        <label class="form-field"><span>Жарнама кезеңі</span><input v-model="draft.marketingPeriod" type="text" maxlength="40" placeholder="29.07–29.08" /></label>
-        <label class="form-field"><span>Лид саны</span><input v-model.number="draft.leads" type="number" min="0" step="1" /></label>
-        <label class="form-field"><span>Жарнама шығыны</span><div class="money-input"><input v-model.number="draft.marketingSpend" type="number" min="0" step="1" /><b>₸</b></div></label>
-        <label class="form-field"><span>Жарнама шығыны ($)</span><div class="money-input"><input v-model.number="draft.marketingSpendUsd" type="number" min="0" step="0.01" /><b>$</b></div></label>
-      </div>
-    </section>
+    <p v-if="finance.error.value" class="finance-error" role="alert">{{ finance.error.value }}</p>
+    <div v-if="!finance.data.value" class="analytics-skeleton" aria-busy="true"><i v-for="n in 4" :key="n" /></div>
 
-    <section class="unit-metric-grid">
-      <article><span><CircleDollarSign :size="19" /></span><small>Бір {{ unitLabel }} табыс</small><strong>{{ metric(result.summary.revenuePerUnit) }}</strong></article>
-      <article><span><Target :size="19" /></span><small>CAC · жаңа клиент құны</small><strong>{{ metric(result.summary.customerAcquisitionCost) }}</strong></article>
-      <article><span><TrendingDown :size="19" /></span><small>CPL · бір лид құны</small><strong>{{ metric(result.summary.costPerLead) }}</strong></article>
-      <article><span><TrendingUp :size="19" /></span><small>Бір {{ unitLabel }} үлесі</small><strong>{{ metric(result.summary.contributionPerUnit) }}</strong></article>
-      <article><span><Calculator :size="19" /></span><small>Залалсыздық нүктесі</small><strong>{{ result.summary.breakEvenUnits === null ? "—" : `${result.summary.breakEvenUnits} ${unitLabel}` }}</strong></article>
-    </section>
-
-    <section class="unit-layout">
-      <article class="panel unit-cost-panel">
-        <header class="panel-header"><div><span class="eyebrow">Барлық шығын</span><h2>Шығын құрылымы</h2><p>Айлықтар сайттан автоматты алынды</p></div><strong>{{ formatMoney(result.summary.totalCosts) }}</strong></header>
-        <div class="unit-cost-list">
-          <div><span class="unit-cost-icon payroll"><UsersRound :size="18" /></span><span><strong>ФОТ</strong><small>Айлық + салық + подрядчик</small></span><b>{{ formatMoney(result.summary.payroll) }}</b></div>
-          <div><span class="unit-cost-icon variable"><WalletCards :size="18" /></span><span><strong>Айнымалы шығын</strong><small>Өнімге немесе тапсырысқа тікелей байланысты</small></span><b>{{ formatMoney(result.summary.variable) }}</b></div>
-          <div><span class="unit-cost-icon marketing"><Target :size="18" /></span><span><strong>Маркетинг</strong><small>Таргет, жарнама және клиент тарту</small></span><b>{{ formatMoney(result.summary.marketing) }}</b></div>
-          <div><span class="unit-cost-icon fixed"><PiggyBank :size="18" /></span><span><strong>Тұрақты шығын</strong><small>Аренда, сервис, байланыс және басқасы</small></span><b>{{ formatMoney(result.summary.fixed) }}</b></div>
+    <template v-else>
+      <section class="panel analytics-panel">
+        <header><div><span class="eyebrow">{{ periodLabel(period) }}</span><h2>Жобаларды салыстыру</h2></div><small class="panel-note">«—» — дерек енгізілмеген</small></header>
+        <div class="table-scroll">
+          <table class="pnl-table">
+            <thead><tr><th scope="col">Көрсеткіш</th><th v-for="p in projects" :key="p.id" scope="col"><i :style="{ background: finance.colorOf(p.id) }" />{{ p.name }}</th><th scope="col" class="total-col">Барлығы</th></tr></thead>
+            <tbody>
+              <tr class="pnl-section"><th :colspan="projects.length + 2" scope="rowgroup">Юнит-экономика</th></tr>
+              <tr v-for="row in unitRows" :key="row.label">
+                <th scope="row">{{ row.label }}<small v-if="row.hint">{{ row.hint }}</small></th>
+                <td v-for="p in projects" :key="p.id" :class="row.tone?.(summaries[p.id]!)">{{ row.value(summaries[p.id]!, p.id) }}</td>
+                <td class="total-col">{{ row.value(total, null) }}</td>
+              </tr>
+              <tr class="pnl-section"><th :colspan="projects.length + 2" scope="rowgroup">Таргет воронкасы</th></tr>
+              <tr v-for="row in funnelRows" :key="row.label">
+                <th scope="row">{{ row.label }}<small v-if="row.hint">{{ row.hint }}</small></th>
+                <td v-for="p in projects" :key="p.id" :class="row.tone?.(summaries[p.id]!)">{{ row.value(summaries[p.id]!, p.id) }}</td>
+                <td class="total-col">{{ row.value(total, null) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <footer class="unit-formula">
-          <div><span>Маржиналдық үлес</span><strong>{{ formatMoney(result.summary.contribution) }}</strong></div>
-          <div :class="result.summary.operatingProfit >= 0 ? 'positive' : 'negative'"><span>{{ result.summary.operatingProfit >= 0 ? "Пайда" : "Залал" }}</span><strong>{{ formatMoney(Math.abs(result.summary.operatingProfit)) }}</strong></div>
-        </footer>
-      </article>
+        <p class="panel-footnote">Юнит көрсеткіштері жобалар арасында қосылмайды: әр жобаның оқушысы әртүрлі. Жалпы CPL/CAC тек таргеті бар барлық жоба лид пен клиент санын енгізгенде есептеледі.</p>
+      </section>
 
-      <article class="panel unit-category-panel">
-        <header class="panel-header"><div><span class="eyebrow">Классификация</span><h2>Категорияларды бөліңіз</h2><p>Таргет шығынын «Маркетинг» деп таңдаңыз</p></div></header>
-        <div v-if="result.categories.length" class="unit-category-list">
-          <label v-for="category in result.categories" :key="category.id">
-            <span><strong>{{ category.name }}</strong><small>{{ formatMoney(category.amount) }}</small></span>
-            <select v-model="draft.categoryGroups[category.id]">
-              <option :value="undefined">Автоматты</option>
-              <option v-for="group in costGroups" :key="group.value" :value="group.value">{{ group.label }}</option>
-            </select>
-          </label>
+      <div class="analytics-columns even">
+        <section class="panel analytics-panel">
+          <header><div><span class="eyebrow">6 ай</span><h2>Таргет шығыны жобалар бойынша</h2></div></header>
+          <ChartColumns caption="Таргет шығыны айлар бойынша" :labels="chart.labels" :details="chart.details" :series="chart.series" :format="money" :axis-format="compactMoney" :height="240" />
+        </section>
+        <section class="panel analytics-panel">
+          <header><div><span class="eyebrow">Динамика</span><h2>CAC және CPL айлар бойынша</h2></div></header>
+          <div class="table-scroll">
+            <table class="pnl-table compact">
+              <thead><tr><th scope="col">Жоба</th><th v-for="p in finance.data.value.window" :key="p" scope="col">{{ periodLabel(p, true) }}</th></tr></thead>
+              <tbody>
+                <template v-for="p in projects" :key="p.id">
+                  <tr><th scope="row"><i :style="{ background: finance.colorOf(p.id) }" />{{ p.name }}<small>CAC · CPL</small></th><td v-for="t in finance.trendOf(p.id)" :key="t.period">{{ compactMoney(t.cac) }}<small class="cell-sub">{{ compactMoney(t.cpl) }}</small></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="metrics-entry" aria-label="Айлық деректерді енгізу">
+        <header><span class="eyebrow">Деректерді енгізу · {{ periodLabel(period) }}</span><h2>Әр жобаның айлық көрсеткіштері</h2><p>Бос өріс — «дерек жоқ». Нақты нөл болса, 0 деп жазыңыз. Таргет шығыны реестрге жеке жазба болып түседі.</p></header>
+        <div class="metrics-grid">
+          <form v-for="p in projects" :id="`metrics-${p.id}`" :key="p.id" class="panel metrics-card" :class="{ focus: focus === p.id }" :style="{ '--project': finance.colorOf(p.id) }" @submit.prevent="save(p.id)">
+            <header>
+              <h3><i />{{ p.name }}</h3>
+              <span v-if="dirty(p.id)" class="dirty-flag">Сақталмаған</span>
+            </header>
+            <div v-if="drafts[p.id]" class="metrics-fields">
+              <label v-for="f in fields" :key="f.key" class="form-field">
+                <span>{{ f.label }}</span>
+                <input v-model="drafts[p.id]![f.key]" type="number" min="0" :step="f.step || '0.01'" placeholder="Енгізілмеген" :inputmode="f.step === '1' ? 'numeric' : 'decimal'">
+                <small><template v-if="f.money && drafts[p.id]![f.key] !== null && drafts[p.id]![f.key] !== ''"><b>{{ money(Number(drafts[p.id]![f.key])) }}</b> · </template>{{ f.hint }}<template v-if="f.key === 'units' && previousOf(p.id)?.units !== null && previousOf(p.id)?.units !== undefined"> · өткен айда {{ formatCount(previousOf(p.id)!.units) }}</template></small>
+              </label>
+              <label class="form-field"><span>Юнит түрі</span><select v-model="drafts[p.id]!.unitType"><option value="client">Оқушы / клиент</option><option value="order">Тапсырыс</option><option value="service">Қызмет</option></select></label>
+              <div class="form-field target-summary">
+                <span>Осы айдағы таргет</span>
+                <strong>{{ money(summaries[p.id]?.funnel.spend) }}</strong>
+                <button type="button" class="text-button" @click="addTarget(p.id)"><CirclePlus :size="14" /> Таргет шығынын қосу</button>
+              </div>
+              <label class="finance-check form-field wide"><input v-model="drafts[p.id]!.marketingAligned" type="checkbox"> Таргет, лидтер және клиенттер бір кезеңге (осы айға) жатады</label>
+              <label class="finance-check form-field wide"><input v-model="drafts[p.id]!.costsReviewed" type="checkbox"> Шығындар тексерілді: айнымалы / тұрақты дұрыс белгіленген</label>
+              <label class="form-field wide"><span>Ескертпе / дереккөз</span><textarea v-model="drafts[p.id]!.notes" rows="2" maxlength="1200" placeholder="Мысалы: CRM есебі, 1–30 қыркүйек" /></label>
+            </div>
+            <footer>
+              <p v-if="messages[p.id]" :class="messages[p.id]!.ok ? 'finance-success' : 'finance-error'" role="status">{{ messages[p.id]!.text }}</p>
+              <button class="button primary" :disabled="saving[p.id] || !dirty(p.id)"><Save :size="16" /> {{ saving[p.id] ? "Сақталуда…" : "Сақтау" }}</button>
+            </footer>
+          </form>
         </div>
-        <div v-else class="unit-empty"><TrendingDown :size="22" /><span>Бұл айда операциялық шығындар жоқ.</span></div>
-      </article>
-    </section>
+      </section>
+    </template>
 
-    <section v-if="!ready" class="unit-notice">
-      <Calculator :size="20" /><span><strong>Есепті аяқтау үшін</strong> айлық табыс пен {{ unitLabel }} санын енгізіңіз. ФОТ және қолдағы шығындар дайын.</span>
-    </section>
+    <FinanceEntryModal v-if="entryDraft" :entry="entryDraft" @close="entryDraft = null" @saved="entryDraft = null" />
   </div>
 </template>

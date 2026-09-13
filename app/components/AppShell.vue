@@ -3,6 +3,8 @@ import { X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const route = useRoute();
+// Analytics pages have their own calendar-month control across all projects.
+const analyticsRoutes = new Set(["/", "/finance", "/unit-economics"]);
 const themeClass = computed(() => {
   const name = payroll.data.value?.selectedWorkspace.name
     .trim()
@@ -16,9 +18,9 @@ const themeClass = computed(() => {
   <div class="app-frame" :class="themeClass">
     <AppNavigation />
     <main class="workspace">
-      <PeriodHeader v-if="route.path !== '/finance'" />
+      <PeriodHeader v-if="!analyticsRoutes.has(route.path)" />
       <div v-if="payroll.error.value" class="global-alert"><span>{{ payroll.error.value }}</span><button type="button" aria-label="Жабу" @click="payroll.error.value = ''"><X :size="17" /></button></div>
-      <div v-if="payroll.loading.value" class="page-loading"><i /><span>Деректер жаңартылуда…</span></div>
+      <div v-if="payroll.loading.value && !analyticsRoutes.has(route.path)" class="page-loading"><i /><span>Деректер жаңартылуда…</span></div>
       <slot />
     </main>
   </div>

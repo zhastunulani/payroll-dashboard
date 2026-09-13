@@ -1,25 +1,39 @@
-# Consolidated finance dashboard
+# Finance dashboards
 
-## Scope
-All Payroll workspaces, without modifying GrantScope or overwriting payroll history.
-`/finance` combines current salary/expense records with a separate supplementary ledger.
+## Screens
+| URL | Purpose |
+|---|---|
+| `/` | Portfolio overview for a calendar month: KPIs, one card per project, 6-month cost trend by project, data-quality checklist, management P&L matrix (lines × projects + total + previous month). |
+| `/finance?project=<id>` | Project P&L: KPIs vs previous month, cost structure by group with revenue line, category P&L vs previous month and budget, payroll by department, target funnel, unit economics, full ledger with CSV export. `project=all` shows the consolidated view. |
+| `/unit-economics` | Cross-project unit economics and target funnel, target spend trend, CAC/CPL by month, and the monthly data-entry form per project (revenue, receipts, students, leads, new paying clients, client lifetime). |
 
-## Delivery plan
-1. Reconcile source workbooks by project, reporting month, actual/budget and existing record IDs.
-2. Add authenticated finance API, supplementary entries and nullable commercial metrics.
-3. Provide project/month filters, expense categories, payment status, plan comparison, unit metrics and editable review queue.
-4. Import only idempotent, traceable entries. Preserve duplicates and ambiguities as excluded review records.
-5. Test calculations, persistence and desktop/mobile browser flows before publication.
+Payroll operations (`/departments`, `/expenses`, `/other-expenses`, `/smz`, `/settings`) are unchanged and remain per workspace.
+
+## Data model
+- One ledger per project × calendar month (`YYYY-MM`), assembled on every read from:
+  - Payroll salary snapshots (settled amount; deducted advances as separate `unknown`-status rows) — the same population as the Payroll screens, so archived or deleted employees are excluded;
+  - Payroll expenses (auto-classified into finance categories);
+  - `finance_entries` (imports and manual rows: target, taxes, contractors, equipment, budget);
+  - legacy unit-economics inputs (fallback; marked duplicate once replaced).
+- Commercial inputs live in `finance_metrics` (JSON per project-month): `revenue`, `receipts`, `units`, `leads`, `customers`, `retentionMonths`, `unitType`, confirmations.
+- `finance_entries.currency / currency_amount / fx_rate` keep the original currency of a payment (e.g. Meta Ads in USD). For USD rows the tenge amount is always derived as USD × rate on save.
+- `GET /api/finance?period=YYYY-MM` returns the selected month's entries plus a 6-month `trend` per project and the months that exist in Payroll.
+- Manual entries can be deleted (`deleteEntry`); imported ones are excluded via their disposition. Every update/delete stores the previous row in `finance_history`.
 
 ## Definitions
-- Registered costs are not the same as confirmed cash paid. Unknown payment status is separate from unpaid.
-- Payroll uses snapshot settlement amounts. Advance deductions are separately flagged; they are not assumed paid again.
-- Equipment and refundable deposits are cash investments/assets, not operating costs. No depreciation or tax rates are invented.
-- Profit is the provisional recorded revenue minus recorded operating costs. It is unavailable without revenue and is not audited net income.
-- Unit metrics require matching project/month inputs. Missing data is `null`, never a fabricated zero. Aggregate revenue/results require all selected projects to report revenue.
-- Budget is never added to actual. Partial advertising periods retain their dates and FX provenance.
-- Report duplicates are linked to live IDs and excluded. Ambiguous imports remain visible in review but excluded from totals until resolved.
-- Imported source values are private database data, not committed in frontend code.
+- Management P&L groups: **ФОТ** (payroll), **Таргет / маркетинг**, **Операциялық** (contractors, rent, services, office, travel, events, variable, other), **Салық**, **Капитал** (equipment, refundable deposits — cash out, but not operating result).
+- Operating result = recognised revenue − operating costs. Unavailable without revenue; it is pre-tax unless taxes are entered.
+- Unit economics per project-month: ARPU = revenue ÷ units; unit contribution = ARPU − variable cost per unit; break-even units = (operating − variable) ÷ unit contribution; LTV = unit contribution × client lifetime (months); payback = CAC ÷ unit contribution; ROMI = (new clients × LTV − marketing) ÷ marketing, or with one month of contribution when lifetime is unknown.
+- Funnel: CPL = marketing ÷ leads, CAC = marketing ÷ new paying clients, conversion = clients ÷ leads. Metrics are computed whenever inputs exist; unconfirmed period alignment is flagged, not hidden.
+- Missing data is `null` ("—"), never a fabricated zero. Consolidated revenue/profit require every project's revenue; pooled CPL/CAC require the funnel of every advertising project. Unit metrics are never pooled across projects.
+- Budget (plan) is never added to actual.
+
+## Data-quality checklist (per project-month)
+Missing revenue, unpaid salaries (critical once the month is closed), unpaid expenses, target spend without leads/clients, leads without spend, revenue without units, missing taxes, unconfirmed payment status, review items, missing amounts, rows in "other", and months not opened in Payroll.
+
+## Maintenance scripts
+- `scripts/import-finance-reports.mjs` — idempotent workbook import (preview by default).
+- `scripts/backfill-ad-currency.mjs` — moves "X USD × Y ₸/USD" from imported target notes into the currency columns (preview by default, `--apply` to write; only rows where amount = USD × rate).
 
 ## Source observations (13 September 2026)
 Latest workbook: Айлық_есеп_жарнама_қосылған.xlsx. Its August grouping includes some September dates in the raw source; retain both the original period and the chosen reporting month.

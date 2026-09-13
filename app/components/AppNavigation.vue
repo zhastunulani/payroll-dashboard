@@ -4,15 +4,16 @@ import { Building2, Calculator, Check, LayoutDashboard, LogOut, Network, Receipt
 const payroll = usePayroll();
 const route = useRoute();
 const links = [
-  { to: "/finance", label: "Барлық жоба · Қаржы", short: "Қаржы", icon: Building2 },
-  { to: "/", label: "Дашборд", short: "Шолу", icon: LayoutDashboard },
-  { to: "/departments", label: "Бөлімдер", short: "Айлық", icon: UsersRound },
-  { to: "/expenses", label: "Шығындар", short: "Шығын", icon: ReceiptText },
-  { to: "/other-expenses", label: "Басқа шығындар", short: "Реестр", icon: ShoppingBag },
-  { to: "/unit-economics", label: "Юнит-экономика", short: "Юнит", icon: Calculator },
-  { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network },
-  { to: "/settings", label: "Баптаулар", short: "Баптау", icon: Settings2 },
+  { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "Талдау" },
+  { to: "/finance", label: "Жоба P&L", short: "P&L", icon: Building2, group: "Талдау" },
+  { to: "/unit-economics", label: "Юнит және таргет", short: "Юнит", icon: Calculator, group: "Талдау" },
+  { to: "/departments", label: "Айлық · бөлімдер", short: "Айлық", icon: UsersRound, group: "Payroll операциялары" },
+  { to: "/expenses", label: "Тұрақты шығындар", short: "Шығын", icon: ReceiptText, group: "Payroll операциялары" },
+  { to: "/other-expenses", label: "Басқа шығындар", short: "Реестр", icon: ShoppingBag, group: "Payroll операциялары" },
+  { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network, group: "Payroll операциялары" },
+  { to: "/settings", label: "Баптаулар", short: "Баптау", icon: Settings2, group: "Payroll операциялары" },
 ];
+const groups = [...new Set(links.map(link => link.group))].map(name => ({ name, links: links.filter(link => link.group === name) }));
 const projectSheetOpen = ref(false);
 const longPressTriggered = ref(false);
 let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -51,10 +52,12 @@ onBeforeUnmount(stopSettingsHold);
   <aside class="app-sidebar">
     <NuxtLink to="/" class="app-logo"><span>A</span><div><strong>Айлық</strong><small>Finance OS</small></div></NuxtLink>
     <nav>
-      <span class="nav-caption">Жұмыс кеңістігі</span>
-      <NuxtLink v-for="link in links" :key="link.to" :to="link.to" :class="{ active: route.path === link.to }">
-        <component :is="link.icon" :size="19" /><span>{{ link.label }}</span>
-      </NuxtLink>
+      <template v-for="group in groups" :key="group.name">
+        <span class="nav-caption">{{ group.name }}</span>
+        <NuxtLink v-for="link in group.links" :key="link.to" :to="link.to" :class="{ active: route.path === link.to }">
+          <component :is="link.icon" :size="19" /><span>{{ link.label }}</span>
+        </NuxtLink>
+      </template>
     </nav>
     <div class="sidebar-status">
       <i /><span><strong>Жүйе жұмыс істеп тұр</strong><small>Деректер синхрондалды</small></span>

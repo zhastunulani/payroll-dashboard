@@ -42,6 +42,20 @@ const CATEGORY_GROUP: Record<Exclude<FinanceCategory, "revenue">, CostGroup> = {
   deposit: "capex",
 };
 
+/**
+ * How money leaves a project, as the owner tracks it:
+ * salaries and mandatory monthly payments (rent, internet, subscriptions) are obligations that are paid or not yet;
+ * advertising and other spending are money already spent.
+ */
+export const FINANCE_KINDS = {
+  salary: "Айлық",
+  mandatory: "Міндетті төлемдер",
+  target: "Таргет / жарнама",
+  other: "Басқа шығындар",
+} as const;
+export type FinanceKind = keyof typeof FINANCE_KINDS;
+export const KIND_ORDER: FinanceKind[] = ["salary", "mandatory", "target", "other"];
+
 /** P&L presentation order: team, acquisition, operations, taxes, then capital below the line. */
 export const PNL_ORDER: Array<Exclude<FinanceCategory, "revenue">> = [
   "payroll", "contractors", "marketing", "variable", "rent", "services",
@@ -66,6 +80,8 @@ export type FinanceEntry = {
   costBehavior?: "fixed" | "variable";
   /** Department for payroll rows, expense category for Payroll expenses. */
   group?: string;
+  /** Payroll expense from the one-time «Басқа шығындар» register (always spent). */
+  oneTime?: boolean;
   /** Original currency data, e.g. an advertising top-up paid in USD. */
   currency?: "KZT" | "USD";
   currencyAmount?: number | null;
@@ -104,6 +120,20 @@ export const isOperatingCost = (category: FinanceCategory) =>
 
 export function categoryGroup(category: FinanceCategory): CostGroup | null {
   return category === "revenue" ? null : CATEGORY_GROUP[category];
+}
+
+export function entryKind(e: Pick<FinanceEntry, "origin" | "category" | "oneTime">): FinanceKind {
+  if (e.origin === "salary") return "salary";
+  if (e.origin === "expense" && !e.oneTime) return "mandatory";
+  return e.category === "marketing" ? "target" : "other";
+}
+
+/**
+ * Only an explicit «unpaid» is still owed. Salary advances and imported spending without a confirmed
+ * status were paid out already, and the one-time register is spent by definition.
+ */
+export function isOutstanding(e: Pick<FinanceEntry, "status" | "origin" | "oneTime">): boolean {
+  return e.status === "unpaid" && !e.oneTime;
 }
 
 export function financePeriod(value: unknown): string {
@@ -230,9 +260,8 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
   const cost = amountOf(actual);
   const operating = amountOf(actual.filter(e => isOperatingCost(e.category)));
   const capital = amountOf(actual.filter(e => !isOperatingCost(e.category)));
-  const paid = amountOf(actual.filter(e => e.status === "paid"));
-  const unpaid = amountOf(actual.filter(e => e.status === "unpaid"));
-  const unknown = amountOf(actual.filter(e => e.status === "unknown"));
+  const unpaid = amountOf(actual.filter(isOutstanding));
+  const paid = sum([cost, -unpaid]);
   const marketingRows = actual.filter(e => e.category === "marketing");
   const marketing = marketingRows.length ? amountOf(marketingRows) : null;
   const taxRows = actual.filter(e => e.category === "tax");
@@ -257,7 +286,7 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
       name: FINANCE_CATEGORIES[key],
       group: CATEGORY_GROUP[key],
       amount: rows.length ? amountOf(rows) : null,
-      paid: amountOf(rows.filter(e => e.status === "paid")),
+      paid: amountOf(rows.filter(e => !isOutstanding(e))),
       plan: plans.length ? amountOf(plans) : null,
       count: rows.length,
     };
@@ -273,8 +302,8 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
     const item = departments.get(name) ?? { name, amount: 0, headcount: 0, paid: 0, unpaid: 0 };
     item.amount = sum([item.amount, row.amount!]);
     if (row.id.startsWith("salary:") && row.amount! > 0) item.headcount += 1;
-    if (row.status === "paid") item.paid = sum([item.paid, row.amount!]);
-    if (row.status === "unpaid") item.unpaid = sum([item.unpaid, row.amount!]);
+    if (isOutstanding(row)) item.unpaid = sum([item.unpaid, row.amount!]);
+    else item.paid = sum([item.paid, row.amount!]);
     departments.set(name, item);
   }
   const payroll = {
@@ -284,11 +313,22 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
     other: sum([groups.payroll, -amountOf(salaryRows), -amountOf(advanceRows)]),
     headcount: staff.length,
     average: staff.length ? amountOf(staff) / staff.length : null,
-    paid: amountOf(salaryRows.filter(e => e.status === "paid")),
-    unpaid: amountOf(salaryRows.filter(e => e.status === "unpaid")),
-    unpaidPeople: salaryRows.filter(e => e.status === "unpaid" && e.amount! > 0).length,
+    // Advances were handed out before the settlement, so they count as paid.
+    paid: amountOf([...salaryRows, ...advanceRows].filter(e => !isOutstanding(e))),
+    unpaid: amountOf(salaryRows.filter(isOutstanding)),
+    unpaidPeople: salaryRows.filter(e => isOutstanding(e) && e.amount! > 0).length,
     departments: [...departments.values()].sort((a, b) => b.amount - a.amount),
   };
+
+  const kinds = Object.fromEntries(KIND_ORDER.map(kind => {
+    const rows = actual.filter(e => entryKind(e) === kind);
+    const owed = rows.filter(isOutstanding);
+    return [kind, { total: amountOf(rows), paid: sum([amountOf(rows), -amountOf(owed)]), unpaid: amountOf(owed), count: rows.length, unpaidCount: owed.filter(e => e.amount! > 0).length }];
+  })) as Record<FinanceKind, { total: number; paid: number; unpaid: number; count: number; unpaidCount: number }>;
+  // Obligations are what has to be paid every month: salaries and mandatory payments.
+  const obligationTotal = sum([kinds.salary.total, kinds.mandatory.total]);
+  const obligationPaid = sum([kinds.salary.paid, kinds.mandatory.paid]);
+  const obligations = { total: obligationTotal, paid: obligationPaid, unpaid: sum([obligationTotal, -obligationPaid]), share: obligationTotal > 0 ? obligationPaid / obligationTotal : null };
 
   const usdRows = marketingRows.filter(e => e.currency === "USD" && e.currencyAmount);
   const leads = metrics.leads, customers = metrics.customers, units = metrics.units;
@@ -327,9 +367,11 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
   };
 
   return {
-    cost, operating, capital, paid, unpaid, unknown, revenue, profit, tax, marketing, plan, variable,
+    cost, operating, capital, paid, unpaid, revenue, profit, tax, marketing, plan, variable,
     revenueRecorded: revenue !== null,
     groups,
+    kinds,
+    obligations,
     categories,
     payroll,
     funnel,
@@ -398,7 +440,7 @@ export type FinanceTrendPoint = {
   profit: number | null;
   paid: number;
   unpaid: number;
-  unknown: number;
+  kinds: Record<FinanceKind, number>;
   plan: number | null;
   headcount: number;
   leads: number | null;
@@ -422,7 +464,7 @@ export function trendPoint(period: string, entries: FinanceEntry[], metrics: Fin
     profit: s.profit,
     paid: s.paid,
     unpaid: s.unpaid,
-    unknown: s.unknown,
+    kinds: Object.fromEntries(KIND_ORDER.map(k => [k, s.kinds[k].total])) as Record<FinanceKind, number>,
     plan: s.plan,
     headcount: s.payroll.headcount,
     leads: metrics.leads,
@@ -441,29 +483,26 @@ export type FinanceIssue = {
   amount?: number;
 };
 
-/** Data-quality checklist for one project-month: what blocks a reliable P&L and unit economics. */
+/** Data-quality checklist for one project-month: what is owed and what blocks a reliable P&L and unit economics. */
 export function financeIssues(summary: FinanceSummary, metrics: FinanceMetrics, opts: { payrollMonth: boolean; closed: boolean }): FinanceIssue[] {
   const issues: FinanceIssue[] = [];
-  if (!opts.payrollMonth) issues.push({ level: "info", code: "no-payroll-month", text: "Payroll-да бұл ай ашылмаған: айлық пен тұрақты шығын жоқ." });
-  if (summary.revenue === null) issues.push({ level: "critical", code: "no-revenue", text: "Табыс енгізілмеген — пайда, маржа және юнит есептелмейді." });
+  if (!opts.payrollMonth) issues.push({ level: "warning", code: "no-payroll-month", text: "Бұл ай ашылмаған: айлық пен міндетті төлемдер әлі жоқ." });
   if (summary.payroll.unpaid > 0) {
-    issues.push({
-      level: opts.closed ? "critical" : "warning",
-      code: "unpaid-salary",
-      text: `${summary.payroll.unpaidPeople} адамның айлығы төленбеген`,
-      amount: summary.payroll.unpaid,
-    });
+    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-salary", text: `${summary.payroll.unpaidPeople} адамның айлығы төленбеген`, amount: summary.payroll.unpaid });
   }
-  const otherUnpaid = sum([summary.unpaid, -summary.payroll.unpaid]);
-  if (otherUnpaid > 0) issues.push({ level: "warning", code: "unpaid-expense", text: "Төленбеген шығындар бар", amount: otherUnpaid });
+  if (summary.kinds.mandatory.unpaid > 0) {
+    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-mandatory", text: `${summary.kinds.mandatory.unpaidCount} міндетті төлем төленбеген`, amount: summary.kinds.mandatory.unpaid });
+  }
+  const otherOwed = sum([summary.kinds.target.unpaid, summary.kinds.other.unpaid]);
+  if (otherOwed > 0) issues.push({ level: "warning", code: "unpaid-other", text: "Реестрде «төленуі керек» деп белгіленген шығын бар", amount: otherOwed });
+  if (summary.revenue === null) issues.push({ level: "critical", code: "no-revenue", text: "Табыс енгізілмеген — пайда, маржа және юнит есептелмейді." });
   if (summary.marketing && metrics.leads === null) issues.push({ level: "warning", code: "no-leads", text: "Таргет шығыны бар, бірақ лид саны енгізілмеген — CPL белгісіз." });
   if (summary.marketing && metrics.customers === null) issues.push({ level: "warning", code: "no-customers", text: "Жаңа ақылы клиенттер саны жоқ — CAC белгісіз." });
   if (!summary.marketing && metrics.leads) issues.push({ level: "warning", code: "leads-without-spend", text: "Лидтер бар, бірақ таргет шығыны тіркелмеген." });
   if (summary.revenue !== null && metrics.units === null) issues.push({ level: "warning", code: "no-units", text: "Оқушы / клиент саны жоқ — ARPU және юнит маржасы есептелмейді." });
-  if (summary.tax === null && summary.groups.payroll > 0) issues.push({ level: "info", code: "no-tax", text: "Салық пен аударымдар енгізілмеген — нәтиже салыққа дейін." });
-  if (summary.unknown > 0) issues.push({ level: "info", code: "unknown-status", text: "Төлем күйі расталмаған сомалар", amount: summary.unknown });
   if (summary.review > 0) issues.push({ level: "warning", code: "review", text: `${summary.review} жазба нақтылауды күтіп тұр (жиынға кірмейді).` });
   if (summary.missingAmounts > 0) issues.push({ level: "warning", code: "missing-amount", text: `${summary.missingAmounts} жазбаның сомасы жоқ.` });
+  if (summary.tax === null && summary.groups.payroll > 0) issues.push({ level: "info", code: "no-tax", text: "Салық пен аударымдар енгізілмеген — нәтиже салыққа дейін." });
   if (summary.otherCount > 0) issues.push({ level: "info", code: "other-category", text: `${summary.otherCount} жазба «Басқа шығын» санатында — жіктеу ұсынылады.` });
   return issues;
 }

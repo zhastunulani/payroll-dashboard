@@ -11,7 +11,9 @@ const props = withDefaults(defineProps<{
   format: (value: number | null) => string;
   axisFormat: (value: number) => string;
   caption: string;
-}>(), { details: () => [], line: null, height: 260 });
+  /** Side-by-side bars per series instead of one stacked column, so series are never summed visually. */
+  grouped?: boolean;
+}>(), { details: () => [], line: null, height: 260, grouped: false });
 
 const root = ref<HTMLElement | null>(null);
 const width = ref(640);
@@ -37,18 +39,29 @@ function niceStep(max: number) {
   return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 2.5 ? 2.5 : unit <= 5 ? 5 : 10) * power;
 }
 const scale = computed(() => {
-  const max = Math.max(1, ...totals.value.map(v => v ?? 0), ...(props.line?.values ?? []).map(v => v ?? 0));
+  const peaks = props.grouped ? props.series.flatMap(s => s.values.map(v => v ?? 0)) : totals.value.map(v => v ?? 0);
+  const max = Math.max(1, ...peaks, ...(props.line?.values ?? []).map(v => v ?? 0));
   const step = niceStep(max);
   const top = Math.ceil(max / step) * step;
   return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step) };
 });
 const y = (value: number) => pad.top + plotH.value - (value / scale.value.top) * plotH.value;
 const band = computed(() => plotW.value / Math.max(1, props.labels.length));
-const barWidth = computed(() => Math.min(24, band.value * 0.5));
+const barWidth = computed(() => props.grouped
+  ? Math.max(3, Math.min(14, (band.value * 0.78 - (props.series.length - 1) * 2) / Math.max(1, props.series.length)))
+  : Math.min(24, band.value * 0.5));
 const cx = (i: number) => pad.left + band.value * i + band.value / 2;
 
 /** Stacked segments, bottom-up, with a 2px surface gap and a 4px rounded data-end on the top segment only. */
 const columns = computed(() => props.labels.map((_, i) => {
+  if (props.grouped) {
+    const n = props.series.length, groupWidth = n * barWidth.value + (n - 1) * 2;
+    const segments = props.series.map((s, index) => {
+      const v = s.values[i] ?? 0;
+      return { key: s.key, color: s.color, x: cx(i) - groupWidth / 2 + index * (barWidth.value + 2), y: y(v), h: Math.max(0, y(0) - y(v)), top: true };
+    }).filter(seg => seg.h > 0);
+    return { segments, total: totals.value[i] };
+  }
   let base = 0;
   const visible = props.series.map(s => ({ s, v: s.values[i] ?? 0 })).filter(x => x.v > 0);
   const segments = visible.map((x, index) => {
@@ -117,8 +130,8 @@ const tooltipStyle = computed(() => {
         </g>
         <g v-for="(column, i) in columns" :key="i" :class="{ dim: active !== null && active !== i }">
           <path v-for="seg in column.segments" :key="seg.key" :d="segmentPath(seg)" :fill="seg.color" />
-          <text v-if="column.total" class="chart-cap" :x="cx(i)" :y="y(column.total) - 7" text-anchor="middle">{{ axisFormat(column.total) }}</text>
-          <text v-else class="chart-empty" :x="cx(i)" :y="y(0) - 8" text-anchor="middle">{{ band < 64 ? "—" : "дерек жоқ" }}</text>
+          <text v-if="column.total && !grouped" class="chart-cap" :x="cx(i)" :y="y(column.total) - 7" text-anchor="middle">{{ axisFormat(column.total) }}</text>
+          <text v-else-if="!column.total" class="chart-empty" :x="cx(i)" :y="y(0) - 8" text-anchor="middle">{{ band < 64 ? "—" : "дерек жоқ" }}</text>
           <text class="chart-x" :x="cx(i)" :y="height - 9" text-anchor="middle">{{ labels[i] }}</text>
         </g>
         <path v-if="linePath" class="chart-line" :d="linePath" />

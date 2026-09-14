@@ -1,7 +1,13 @@
 <script setup lang="ts">
 const payroll = usePayroll();
+const route = useRoute();
 
-onMounted(() => payroll.load());
+onMounted(() => {
+  // A link from the reports (?workspace=&month=) opens that payroll profile and month directly.
+  const workspace = typeof route.query.workspace === "string" ? route.query.workspace : undefined;
+  const month = typeof route.query.month === "string" && PAYROLL_ROUTES.has(route.path) ? route.query.month : undefined;
+  payroll.load(month, workspace);
+});
 </script>
 
 <template>

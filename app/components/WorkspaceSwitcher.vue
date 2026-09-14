@@ -2,6 +2,7 @@
 import { BriefcaseBusiness, Check, ChevronsUpDown, Plus } from "lucide-vue-next";
 
 const payroll = usePayroll();
+const ctx = useAppContext();
 const open = ref(false);
 const createOpen = ref(false);
 const name = ref("");
@@ -34,7 +35,7 @@ async function createWorkspace() {
   <div ref="root" class="workspace-switcher sidebar-workspace-switcher">
     <button class="workspace-trigger" type="button" :aria-expanded="open" @click.stop="open = !open">
       <span class="workspace-trigger-copy">
-        <strong>{{ payroll.data.value?.selectedWorkspace.name || "EdUser" }}</strong>
+        <strong><i class="switcher-dot" :style="{ background: ctx.workspaceColor.value }" />{{ payroll.data.value?.selectedWorkspace.name || "EdUser" }}</strong>
       </span>
       <ChevronsUpDown :size="16" />
     </button>
@@ -46,7 +47,7 @@ async function createWorkspace() {
       </header>
       <div class="workspace-options">
         <button v-for="item in payroll.data.value?.workspaces" :key="item.id" type="button" :class="{ active: item.id === payroll.data.value?.selectedWorkspace.id }" @click="select(item.id)">
-          <span><strong>{{ item.name }}</strong></span>
+          <span><strong><i class="switcher-dot" :style="{ background: ctx.colorOf(item.id) }" />{{ item.name }}</strong></span>
           <Check v-if="item.id === payroll.data.value?.selectedWorkspace.id" :size="17" />
         </button>
       </div>

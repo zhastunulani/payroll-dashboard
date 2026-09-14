@@ -1,4 +1,5 @@
 import { getRawDb } from "./database";
+import { OTHER_EXPENSE_CATEGORY_NAME } from "./expenses";
 import { FINANCE_SCHEMA } from "./finance-schema";
 import {
   classifyFinanceCost,
@@ -90,9 +91,9 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
       WHERE e.archived_at IS NULL AND m.year*100+m.month BETWEEN ? AND ?
       GROUP BY s.id,m.year,m.month`).bind(periodNumber(from), periodNumber(to))
       .all<{ id: string; workspace_id: string; year: number; month: number; employee_name: string; department_name: string; base_salary: number; is_paid: number; note: string; adjustment: number; advances: number }>(),
-    db.prepare(`SELECT e.id,e.workspace_id,m.year,m.month,e.name,e.category_name,e.amount,e.is_paid
+    db.prepare(`SELECT e.id,e.workspace_id,m.year,m.month,e.name,e.category_name,e.amount,e.is_paid,e.is_recurring
       FROM expenses e JOIN months m ON m.id=e.month_id WHERE m.year*100+m.month BETWEEN ? AND ?`).bind(periodNumber(from), periodNumber(to))
-      .all<{ id: string; workspace_id: string; year: number; month: number; name: string; category_name: string; amount: number; is_paid: number }>(),
+      .all<{ id: string; workspace_id: string; year: number; month: number; name: string; category_name: string; amount: number; is_paid: number; is_recurring: number }>(),
     db.prepare(`SELECT a.value,m.workspace_id,m.year,m.month FROM months m JOIN app_settings a ON a.key='unit_economics:' || m.workspace_id || ':' || m.id
       WHERE m.year*100+m.month BETWEEN ? AND ?`).bind(periodNumber(from), periodNumber(to))
       .all<{ value: string; workspace_id: string; year: number; month: number }>(),
@@ -111,11 +112,13 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
     const amount = Math.max(0, Number(s.base_salary) + Number(s.adjustment));
     all.push(live({ id: `salary:${s.id}`, workspaceId: s.workspace_id, period: p, name: `${s.employee_name} · ${s.department_name}`, amount, category: "payroll", status: s.is_paid === 1 ? "paid" : "unpaid", origin: "salary", note: s.note || "", group: s.department_name }));
     if (Number(s.advances) > 0) {
-      all.push(live({ id: `advance:${s.id}`, workspaceId: s.workspace_id, period: p, name: `${s.employee_name} · аванс`, amount: Number(s.advances), category: "payroll", status: "unknown", origin: "salary", group: s.department_name, note: "Айлықтан шегерілген аванс. ФОТ құрамында; нақты төлем күні мен банк төлемін растау керек. Қайта төлеуге арналған сома емес." }));
+      all.push(live({ id: `advance:${s.id}`, workspaceId: s.workspace_id, period: p, name: `${s.employee_name} · аванс`, amount: Number(s.advances), category: "payroll", status: "paid", origin: "salary", group: s.department_name, note: "Ай ішінде бұрын берілген аванс: айлықтан шегерілді, ФОТ құрамында және төленген болып саналады." }));
     }
   }
   for (const e of expenses.results) {
-    all.push(live({ id: `expense:${e.id}`, workspaceId: e.workspace_id, period: periodKey(e.year, e.month), name: e.name, amount: Number(e.amount), category: classifyFinanceCost(e.name, e.category_name), status: e.is_paid === 1 ? "paid" : "unpaid", origin: "expense", note: e.category_name, group: e.category_name }));
+    // Same rule as the Payroll screens: the «Басқа шығындар» register holds one-time, already spent money.
+    const oneTime = e.category_name === OTHER_EXPENSE_CATEGORY_NAME && Number(e.is_recurring) === 0;
+    all.push(live({ id: `expense:${e.id}`, workspaceId: e.workspace_id, period: periodKey(e.year, e.month), name: e.name, amount: Number(e.amount), category: classifyFinanceCost(e.name, e.category_name), status: oneTime || e.is_paid === 1 ? "paid" : "unpaid", origin: "expense", note: e.category_name, group: e.category_name, oneTime }));
   }
   const legacySettings = legacy.results
     .map(r => ({ ...r, period: periodKey(r.year, r.month), settings: parseJson(r.value) }))

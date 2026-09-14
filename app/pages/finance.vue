@@ -1,56 +1,55 @@
 <script setup lang="ts">
-import { ArrowDownToLine, ArrowRight, CirclePlus, Pencil, RefreshCw } from "lucide-vue-next";
-import { COST_GROUPS, FINANCE_CATEGORIES, isOperatingCost, type CostGroup, type FinanceEntry, type FinanceTrendPoint } from "../../lib/finance";
+import { ArrowDownToLine, ArrowRight, CirclePlus, Pencil } from "lucide-vue-next";
+import { FINANCE_CATEGORIES, FINANCE_KINDS, KIND_ORDER, entryKind, isOperatingCost, isOutstanding, type FinanceEntry, type FinanceKind } from "../../lib/finance";
 
 const route = useRoute();
 const payroll = usePayroll();
 const finance = useFinance();
-const { projects, summaries, total, period } = finance;
+const ctx = useAppContext();
+const { period } = finance;
 onMounted(finance.load);
 
+// The report has its own project tabs; they never change the payroll profile.
 const project = ref(typeof route.query.project === "string" ? route.query.project : "");
-// Keep the requested project until the project list is known; fall back only if it does not exist.
-watch(projects, list => {
-  if (list.length && project.value !== "all" && !list.some(p => p.id === project.value)) project.value = list[0]!.id;
+watch(finance.projects, list => {
+  if (list.length && !list.some(p => p.id === project.value)) project.value = list[0]!.id;
 }, { immediate: true });
-watch(project, id => navigateTo({ query: { ...route.query, project: id } }, { replace: true }));
-const isAll = computed(() => project.value === "all");
-const summary = computed(() => isAll.value ? total.value : summaries.value[project.value] ?? null);
-const metrics = computed(() => isAll.value ? null : finance.metricsOf(project.value));
-const accent = computed(() => isAll.value ? "#495cf8" : finance.colorOf(project.value));
-
-/** Trend for the view: one project, or the sum of all projects month by month. */
-const trend = computed<FinanceTrendPoint[]>(() => {
-  if (!isAll.value) return finance.trendOf(project.value);
-  const lists = projects.value.map(p => finance.trendOf(p.id));
-  return (finance.data.value?.window ?? []).map((p, i) => {
-    const points = lists.map(list => list[i]).filter((x): x is FinanceTrendPoint => !!x);
-    const add = (pick: (x: FinanceTrendPoint) => number) => points.reduce((a, x) => a + pick(x), 0);
-    const revenueKnown = points.length > 0 && points.every(x => x.revenue !== null);
-    const categories: FinanceTrendPoint["categories"] = {};
-    for (const x of points) for (const [k, v] of Object.entries(x.categories)) categories[k as keyof typeof categories] = (categories[k as keyof typeof categories] ?? 0) + v;
-    return {
-      period: p, cost: add(x => x.cost), operating: add(x => x.operating), capital: add(x => x.capital),
-      groups: Object.fromEntries((Object.keys(COST_GROUPS) as CostGroup[]).map(g => [g, add(x => x.groups[g])])) as Record<CostGroup, number>,
-      categories, revenue: revenueKnown ? add(x => x.revenue ?? 0) : null, profit: revenueKnown ? add(x => x.profit ?? 0) : null,
-      paid: add(x => x.paid), unpaid: add(x => x.unpaid), unknown: add(x => x.unknown), plan: null, headcount: add(x => x.headcount),
-      leads: null, customers: null, units: null, cac: null, cpl: null, hasData: points.some(x => x.hasData),
-    };
-  });
-});
+watch(project, id => {
+  finance.reportProject.value = id;
+  if (id && route.query.project !== id) navigateTo({ query: { ...route.query, project: id }, hash: route.hash }, { replace: true });
+}, { immediate: true });
+watch(() => route.query.project, id => { if (typeof id === "string" && id && id !== project.value) project.value = id; });
+const summary = computed(() => finance.summaries.value[project.value] ?? null);
+const metrics = computed(() => finance.metricsOf(project.value));
+const trend = computed(() => finance.trendOf(project.value));
 const previous = computed(() => trend.value.length > 1 ? trend.value[trend.value.length - 2]! : null);
-const prevValue = <T,>(pick: (p: FinanceTrendPoint) => T) => previous.value?.hasData ? pick(previous.value) : null;
+const prevValue = <T,>(pick: (p: NonNullable<typeof previous.value>) => T) => previous.value?.hasData ? pick(previous.value) : null;
+const entries = computed(() => finance.entriesOf(project.value).filter(e => e.disposition === "included" && e.basis === "actual" && e.amount !== null));
+
+// Jump to #ledger, #pnl, #payments or #issues once the report has rendered.
+watch([summary, () => route.hash, () => route.query], ([value]) => {
+  if (value && route.hash) nextTick(() => document.getElementById(route.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}, { immediate: true });
 
 const chart = computed(() => ({
   labels: trend.value.map(t => periodLabel(t.period, true)),
   details: trend.value.map(t => periodLabel(t.period)),
-  series: (Object.keys(COST_GROUPS) as CostGroup[]).map(g => ({ key: g, label: COST_GROUPS[g], color: GROUP_COLORS[g], values: trend.value.map(t => t.hasData ? t.groups[g] : null) })),
+  series: KIND_ORDER.map(k => ({ key: k, label: FINANCE_KINDS[k], color: KIND_COLORS[k], values: trend.value.map(t => t.hasData ? t.kinds[k] : null) })),
   line: trend.value.some(t => t.revenue !== null) ? { label: "Табыс", values: trend.value.map(t => t.revenue) } : null,
 }));
 
-const projectIssues = computed(() => isAll.value
-  ? projects.value.flatMap(p => (finance.issues.value[p.id] ?? []).filter(i => i.level !== "info").map(issue => ({ issue, project: p.name, color: finance.colorOf(p.id) })))
-  : (finance.issues.value[project.value] ?? []).map(issue => ({ issue })));
+/** The four ways money left this project this month, each with what is still owed. */
+const buckets = computed(() => KIND_ORDER.map(kind => {
+  const rows = entries.value.filter(e => entryKind(e) === kind).sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
+  const owed = rows.filter(isOutstanding);
+  const k = summary.value!.kinds[kind];
+  const to = kind === "salary" ? ctx.payrollLink("/departments", project.value, "#payment-queue")
+    : kind === "mandatory" ? ctx.payrollLink("/expenses", project.value)
+    : ctx.financeLink(project.value, { kind }, "#ledger");
+  return { kind, label: FINANCE_KINDS[kind], color: KIND_COLORS[kind], ...k, obligation: kind === "salary" || kind === "mandatory", list: (owed.length ? owed : rows).slice(0, 4), showingOwed: owed.length > 0, to };
+}));
+
+const issues = computed(() => (finance.issues.value[project.value] ?? []).map(issue => ({ issue, to: ctx.issueLink(issue.code, project.value) })));
 
 const pnlRows = computed(() => {
   const s = summary.value;
@@ -61,126 +60,125 @@ const pnlRows = computed(() => {
   });
 });
 const hasPlan = computed(() => pnlRows.value.some(r => r.plan !== null));
-
-const payrollRows = computed(() => {
-  if (!summary.value) return [];
-  if (isAll.value) return projects.value.map(p => { const s = summaries.value[p.id]!; return { name: p.name, amount: s.payroll.total, headcount: s.payroll.headcount, paid: s.payroll.paid, unpaid: s.payroll.unpaid, color: finance.colorOf(p.id) }; }).filter(r => r.amount > 0);
-  return summary.value.payroll.departments.filter(d => d.amount > 0).map(d => ({ ...d, color: accent.value }));
-});
+const payrollRows = computed(() => summary.value?.payroll.departments.filter(d => d.amount > 0) ?? []);
 const payrollMax = computed(() => Math.max(1, ...payrollRows.value.map(r => r.amount)));
-const unitName = computed(() => ({ client: "оқушы", order: "тапсырыс", service: "қызмет" })[metrics.value?.unitType ?? "client"]);
+const unitName = computed(() => ({ client: "оқушы", order: "тапсырыс", service: "қызмет" })[metrics.value.unitType]);
 const unitTitle = computed(() => unitName.value.charAt(0).toLocaleUpperCase("kk-KZ") + unitName.value.slice(1));
-function openPayroll() {
-  openLive({ id: "", workspaceId: project.value, period: period.value, origin: "salary" } as FinanceEntry);
-}
 
-// Ledger
-const view = ref<"actual" | "plan" | "review" | "duplicates">("actual");
-const category = ref("all"), search = ref(""), page = ref(1);
-const entryDraft = ref<Partial<FinanceEntry> | null>(null);
-const actionError = ref("");
-const viewEntries = computed(() => isAll.value ? finance.data.value?.entries ?? [] : finance.entriesOf(project.value));
+// Ledger, filterable from links: ?kind=&category=&view=&status=
+const q = (key: string) => typeof route.query[key] === "string" ? route.query[key] as string : "";
+const kindFilter = ref<"all" | FinanceKind>((KIND_ORDER as string[]).includes(q("kind")) ? q("kind") as FinanceKind : "all");
+const view = ref<"actual" | "plan" | "review" | "duplicates">((["plan", "review", "duplicates"] as const).find(v => v === q("view")) ?? "actual");
+const category = ref(Object.hasOwn(FINANCE_CATEGORIES, q("category")) ? q("category") : "all");
+const onlyOwed = ref(q("status") === "unpaid");
+const search = ref(""), page = ref(1), actionError = ref("");
+watch(() => route.query, query => {
+  if (typeof query.kind === "string" && (KIND_ORDER as string[]).includes(query.kind)) kindFilter.value = query.kind as FinanceKind;
+  if (typeof query.category === "string" && Object.hasOwn(FINANCE_CATEGORIES, query.category)) category.value = query.category;
+  if (typeof query.view === "string") view.value = (["plan", "review", "duplicates"] as const).find(v => v === query.view) ?? "actual";
+  onlyOwed.value = query.status === "unpaid";
+});
+const viewEntries = computed(() => finance.entriesOf(project.value));
 const reviewCount = computed(() => viewEntries.value.filter(e => e.disposition === "review" || (e.disposition === "included" && e.amount === null)).length);
 const rows = computed(() => viewEntries.value.filter(e =>
   (view.value === "review" ? e.disposition === "review" || (e.disposition === "included" && e.amount === null)
     : view.value === "duplicates" ? e.disposition === "duplicate" : e.disposition === "included" && e.basis === view.value)
+  && (kindFilter.value === "all" || entryKind(e) === kindFilter.value)
   && (category.value === "all" || e.category === category.value)
+  && (!onlyOwed.value || isOutstanding(e))
   && `${e.name} ${e.note} ${e.source} ${e.group ?? ""}`.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()),
 ).sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0)));
 const pages = computed(() => Math.max(1, Math.ceil(rows.value.length / 25)));
 const shownRows = computed(() => rows.value.slice((page.value - 1) * 25, page.value * 25));
-watch([project, view, category, search, period], () => { page.value = 1; });
-const statusLabels = { paid: "Төленген", unpaid: "Төленбеген", unknown: "Расталмаған" };
-const originLabels = { salary: "Payroll · айлық", expense: "Payroll · шығын", legacy: "Ескі юнит-экономика", import: "Excel импорт", manual: "Қолмен" };
+watch([project, view, category, search, period, kindFilter, onlyOwed], () => { page.value = 1; });
+const kindCount = (kind: "all" | FinanceKind) => viewEntries.value.filter(e => e.disposition === "included" && e.basis === "actual" && (kind === "all" || entryKind(e) === kind)).length;
+const originLabels = { salary: "Айлық", expense: "Payroll", legacy: "Ескі юнит-экономика", import: "Excel импорт", manual: "Қолмен" };
+const statusLabel = (e: FinanceEntry) => isOutstanding(e) ? "Төленбеген" : entryKind(e) === "salary" || entryKind(e) === "mandatory" ? "Төленді" : "Жұмсалды";
 const editable = (e: FinanceEntry) => e.origin === "import" || e.origin === "manual";
-
-function addEntry(preset: Partial<FinanceEntry> = {}) {
-  entryDraft.value = {
-    workspaceId: isAll.value ? projects.value[0]?.id : project.value, period: period.value, name: "", category: "other", amount: null,
-    basis: view.value === "plan" ? "plan" : "actual", status: "paid", disposition: "included", source: "Қолмен енгізілген", note: "", relatedId: "", currency: "KZT", ...preset,
-  };
+function livePath(r: FinanceEntry) {
+  if (r.origin === "salary") return ctx.payrollLink("/departments", r.workspaceId);
+  if (r.origin === "legacy") return unitLink.value;
+  return ctx.payrollLink("/expenses", r.workspaceId, "", r.oneTime ? { tab: "other" } : {});
 }
-async function openLive(r: FinanceEntry) {
-  await payroll.load(r.period, r.workspaceId);
-  if (payroll.error.value || payroll.data.value?.selectedWorkspace.id !== r.workspaceId || payroll.data.value?.selectedMonth.id !== r.period) {
-    actionError.value = "Payroll-да бұл жоба мен ай ашылмады.";
-    return;
-  }
-  await navigateTo(r.origin === "salary" ? "/departments" : r.origin === "legacy" ? "/unit-economics" : r.note === "Басқа шығындар" ? "/other-expenses" : "/expenses");
-}
+const unitLink = computed(() => `/unit-economics?month=${period.value}#metrics-${project.value}`);
 async function classify(r: FinanceEntry, event: Event) {
   const target = event.target as HTMLSelectElement;
   actionError.value = await finance.classify(r, target.value);
   if (actionError.value) target.value = r.costBehavior || "fixed";
 }
 function exportRows() {
-  const fields = ["Жоба", "Есептік ай", "Атауы", "Бөлім / топ", "Категория", "Сома, ₸", "USD", "Бағам", "Факт / жоспар", "Төлем күйі", "Есепке қосылуы", "Дереккөз", "Ескерту"];
+  const fields = ["Жоба", "Есептік ай", "Атауы", "Түрі", "Бөлім / топ", "Категория", "Сома, ₸", "USD", "Бағам", "Факт / жоспар", "Төлем", "Есепке қосылуы", "Дереккөз", "Ескерту"];
   // Neutralize spreadsheet formula injection in user-authored text.
   const escape = (v: unknown) => `"${String(v ?? "").replace(/^[=+@-]/, "'$&").replaceAll('"', '""')}"`;
-  const csv = "\uFEFF" + [fields, ...rows.value.map(e => [finance.nameOf(e.workspaceId), e.period, e.name, e.group ?? "", FINANCE_CATEGORIES[e.category], e.amount ?? "", e.currencyAmount ?? "", e.fxRate ?? "", e.basis === "plan" ? "Жоспар" : "Факт", statusLabels[e.status], e.disposition, e.source, e.note])]
+  const csv = BOM + [fields, ...rows.value.map(e => [finance.nameOf(e.workspaceId), e.period, e.name, FINANCE_KINDS[entryKind(e)], e.group ?? "", FINANCE_CATEGORIES[e.category], e.amount ?? "", e.currencyAmount ?? "", e.fxRate ?? "", e.basis === "plan" ? "Жоспар" : "Факт", statusLabel(e), e.disposition, e.source, e.note])]
     .map(r => r.map(escape).join(";")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `finance-${isAll.value ? "all" : finance.nameOf(project.value)}-${period.value}-${view.value}.csv`;
+  a.download = `finance-${finance.nameOf(project.value)}-${period.value}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
+const BOM = String.fromCharCode(0xfeff);
 </script>
 
 <template>
-  <div class="analytics-page" :style="{ '--project': accent }">
-    <header class="analytics-header">
-      <div>
-        <span class="eyebrow">Жоба бойынша P&amp;L</span>
-        <h1>{{ isAll ? "Барлық жоба" : finance.nameOf(project) }}</h1>
-        <p>Шығын, табыс, ФОТ, таргет және юнит-экономика — {{ periodLabel(period) }}</p>
-      </div>
-      <div class="analytics-actions">
-        <FinancePeriodControl />
-        <button class="button secondary icon-only" type="button" aria-label="Жаңарту" :disabled="finance.loading.value" @click="finance.load"><RefreshCw :size="17" :class="{ spin: finance.loading.value }" /></button>
-        <button class="button primary" type="button" :disabled="!finance.data.value" @click="addEntry()"><CirclePlus :size="17" /> Жазба қосу</button>
-      </div>
-    </header>
-
+  <div class="analytics-page" :style="{ '--project': finance.colorOf(project) }">
+    <AnalyticsHeader />
     <nav class="project-tabs" aria-label="Жобалар">
-      <button v-for="p in projects" :key="p.id" type="button" :class="{ active: project === p.id }" :aria-pressed="project === p.id" @click="project = p.id"><i :style="{ background: finance.colorOf(p.id) }" />{{ p.name }}</button>
-      <button type="button" :class="{ active: isAll }" :aria-pressed="isAll" @click="project = 'all'">Барлығы</button>
+      <button v-for="p in finance.projects.value" :key="p.id" type="button" :class="{ active: project === p.id }" :aria-pressed="project === p.id" :style="{ '--tab': finance.colorOf(p.id) }" @click="project = p.id"><i :style="{ background: finance.colorOf(p.id) }" />{{ p.name }}</button>
     </nav>
-
     <p v-if="finance.error.value || actionError" class="finance-error" role="alert">{{ finance.error.value || actionError }}</p>
     <div v-if="!summary" class="analytics-skeleton" aria-busy="true"><i v-for="n in 4" :key="n" /></div>
 
     <template v-else>
       <section class="kpi-row" aria-label="Негізгі көрсеткіштер" :class="{ stale: !finance.fresh.value }">
-        <KpiTile tone="brand" label="Айдың шығыны" :value="money(summary.cost)" :sub="`Төленді ${compactMoney(summary.paid)} · қалды ${compactMoney(summary.unpaid + summary.unknown)}`" :delta="relativeChange(summary.cost, prevValue(p => p.cost))" />
-        <KpiTile label="Табыс" :value="money(summary.revenue)" :sub="summary.revenue === null ? 'Юнит бетінде енгізіңіз' : summary.unit.arpu !== null ? `ARPU ${money(summary.unit.arpu)}` : summary.cashNet !== null ? `Түсім − төленген: ${compactMoney(summary.cashNet)}` : 'Танылған табыс'" :delta="relativeChange(summary.revenue, prevValue(p => p.revenue))" good-when="up" />
+        <KpiTile tone="brand" label="Айдың шығыны" :value="money(summary.cost)" :sub="`Жұмсалды ${compactMoney(summary.paid)}`" :delta="relativeChange(summary.cost, prevValue(p => p.cost))" />
+        <KpiTile :tone="summary.obligations.unpaid > 0 ? 'danger' : 'success'" label="Төленуі керек" :value="money(summary.obligations.unpaid)" :sub="`Айлық ${compactMoney(summary.kinds.salary.unpaid)} · міндетті ${compactMoney(summary.kinds.mandatory.unpaid)}`" />
+        <KpiTile label="Табыс" :value="money(summary.revenue)" :sub="summary.revenue === null ? 'Юнит бетінде енгізіңіз' : summary.unit.arpu !== null ? `ARPU ${money(summary.unit.arpu)}` : 'Танылған табыс'" :delta="relativeChange(summary.revenue, prevValue(p => p.revenue))" good-when="up" />
         <KpiTile label="Операциялық нәтиже" :tone="summary.profit === null ? 'default' : summary.profit < 0 ? 'danger' : 'success'" :value="money(summary.profit)" :sub="summary.margin === null ? 'Табыс − операциялық шығын' : `Маржа ${formatPercent(summary.margin)}`" :delta="relativeChange(summary.profit, prevValue(p => p.profit))" good-when="up" />
-        <KpiTile label="ФОТ" :value="money(summary.groups.payroll)" :sub="`${summary.payroll.headcount} адам · орташа ${compactMoney(summary.payroll.average)}`" :delta="relativeChange(summary.groups.payroll, prevValue(p => p.groups.payroll))" />
-        <KpiTile label="Таргет / маркетинг" :value="money(summary.groups.marketing)" :sub="summary.funnel.cpl !== null ? `CPL ${money(summary.funnel.cpl)} · CAC ${money(summary.funnel.cac)}` : 'Лид / клиент саны енгізілмеген'" :delta="relativeChange(summary.groups.marketing, prevValue(p => p.groups.marketing))" />
+        <KpiTile label="Таргет" :value="money(summary.kinds.target.total)" :sub="summary.funnel.cpl !== null ? `CPL ${money(summary.funnel.cpl)} · CAC ${money(summary.funnel.cac)}` : 'Лид / клиент саны енгізілмеген'" :delta="relativeChange(summary.kinds.target.total, prevValue(p => p.kinds.target))" />
+      </section>
+
+      <section id="payments" class="bucket-grid" aria-label="Төлем бақылауы">
+        <NuxtLink v-for="b in buckets" :key="b.kind" :to="b.to" class="panel bucket-card" :style="{ '--bucket': b.color }">
+          <header><span><i />{{ b.label }}</span><ArrowRight :size="15" /></header>
+          <strong>{{ money(b.total) }}</strong>
+          <template v-if="b.obligation">
+            <span class="meter"><i :style="{ width: `${b.total ? b.paid / b.total * 100 : 0}%` }" /></span>
+            <small v-if="b.unpaid" class="pp-owed">Төленді {{ compactMoney(b.paid) }} · қалды {{ money(b.unpaid) }}</small>
+            <small v-else-if="b.total" class="pp-done">Толық төленді</small>
+            <small v-else class="pp-none">Бұл айда жазба жоқ</small>
+          </template>
+          <small v-else class="pp-none">{{ b.count }} жазба · жұмсалған ақша</small>
+          <ul v-if="b.list.length">
+            <li v-for="e in b.list" :key="e.id"><span>{{ e.name }}</span><b :class="{ owed: isOutstanding(e) }">{{ money(e.amount) }}</b></li>
+          </ul>
+          <small v-if="b.showingOwed" class="bucket-note">Төленбегендер көрсетілді</small>
+        </NuxtLink>
       </section>
 
       <div class="analytics-columns">
         <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">6 ай</span><h2>Шығын құрылымы және табыс</h2></div></header>
-          <ChartColumns caption="Шығын құрылымы айлар бойынша" :labels="chart.labels" :details="chart.details" :series="chart.series" :line="chart.line" :format="money" :axis-format="compactMoney" />
+          <header><div><span class="eyebrow">6 ай</span><h2>Ақша қайда кетті және табыс</h2></div></header>
+          <ChartColumns caption="Шығын түрлері айлар бойынша" :labels="chart.labels" :details="chart.details" :series="chart.series" :line="chart.line" :format="money" :axis-format="compactMoney" />
         </section>
-        <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">Деректер сапасы</span><h2>Не толтыру керек</h2></div><NuxtLink v-if="!isAll" :to="`/unit-economics?project=${project}&period=${period}`" class="text-button">Енгізу <ArrowRight :size="14" /></NuxtLink></header>
-          <FinanceIssueList :items="projectIssues" />
+        <section id="issues" class="panel analytics-panel">
+          <header><div><span class="eyebrow">Бақылау</span><h2>Не істеу керек</h2></div><NuxtLink :to="unitLink" class="text-button">Деректерді енгізу <ArrowRight :size="14" /></NuxtLink></header>
+          <FinanceIssueList :items="issues" />
         </section>
       </div>
 
-      <section class="panel analytics-panel">
+      <section id="pnl" class="panel analytics-panel">
         <header><div><span class="eyebrow">P&amp;L</span><h2>Шығындар санаттар бойынша</h2></div><small class="panel-note">Салыстыру: {{ periodLabel(shiftPeriod(period, -1)) }}</small></header>
         <div class="table-scroll">
           <table class="pnl-table detail">
             <thead><tr><th scope="col">Санат</th><th scope="col">Осы ай</th><th scope="col">Үлесі</th><th scope="col">Өткен ай</th><th scope="col">Өзгеріс</th><template v-if="hasPlan"><th scope="col">Жоспар</th><th scope="col">Орындалуы</th></template></tr></thead>
             <tbody>
-              <tr class="subtotal"><th scope="row">Табыс</th><td>{{ money(summary.revenue) }}</td><td /><td>{{ money(prevValue(p => p.revenue)) }}</td><td /><template v-if="hasPlan"><td /><td /></template></tr>
+              <tr class="subtotal"><th scope="row">Табыс</th><td><NuxtLink :to="unitLink" class="cell-link">{{ money(summary.revenue) }}</NuxtLink></td><td /><td>{{ money(prevValue(p => p.revenue)) }}</td><td /><template v-if="hasPlan"><td /><td /></template></tr>
               <tr v-for="r in pnlRows" :key="r.key" :class="{ capital: r.group === 'capex' }">
                 <th scope="row"><i class="group-dot" :style="{ background: GROUP_COLORS[r.group] }" />{{ r.name }}</th>
-                <td>{{ money(r.amount) }}</td>
+                <td><NuxtLink v-if="r.amount" :to="ctx.financeLink(project, { category: r.key }, '#ledger')" class="cell-link">{{ money(r.amount) }}</NuxtLink><template v-else>{{ money(r.amount) }}</template></td>
                 <td><span v-if="r.share !== null" class="share-bar"><i :style="{ width: `${r.share * 100}%` }" />{{ formatPercent(r.share, 0) }}</span></td>
                 <td>{{ money(r.previous) }}</td>
                 <td><span v-if="r.delta !== null" class="delta-chip" :class="Math.abs(r.delta) < 0.0005 ? 'flat' : r.delta > 0 ? 'bad' : 'good'">{{ r.delta > 0 ? "+" : "−" }}{{ formatDelta(r.delta) }}</span></td>
@@ -188,28 +186,28 @@ function exportRows() {
               </tr>
               <tr class="subtotal"><th scope="row">Операциялық шығын</th><td>{{ money(summary.operating) }}</td><td /><td>{{ money(prevValue(p => p.operating)) }}</td><td /><template v-if="hasPlan"><td /><td /></template></tr>
               <tr class="result"><th scope="row">Операциялық нәтиже</th><td :class="{ negative: (summary.profit ?? 0) < 0 }">{{ money(summary.profit) }}</td><td>{{ formatPercent(summary.margin) }}</td><td>{{ money(prevValue(p => p.profit)) }}</td><td /><template v-if="hasPlan"><td /><td /></template></tr>
-              <tr class="subtotal"><th scope="row">Барлық ақша шығыны</th><td>{{ money(summary.cost) }}</td><td /><td>{{ money(prevValue(p => p.cost)) }}</td><td /><template v-if="hasPlan"><td>{{ money(summary.plan) }}</td><td>{{ summary.plan ? formatPercent(summary.cost / summary.plan, 0) : "" }}</td></template></tr>
+              <tr class="subtotal"><th scope="row">Айдың шығыны, барлығы</th><td>{{ money(summary.cost) }}</td><td /><td>{{ money(prevValue(p => p.cost)) }}</td><td /><template v-if="hasPlan"><td>{{ money(summary.plan) }}</td><td>{{ summary.plan ? formatPercent(summary.cost / summary.plan, 0) : "" }}</td></template></tr>
             </tbody>
           </table>
         </div>
-        <p class="panel-footnote">Жоспар — жеке бюджет, фактке қосылмайды. Ай жабылмайынша жоспардан төмен факт үнем деп саналмайды.</p>
+        <p class="panel-footnote">Жоспар — жеке бюджет, фактке қосылмайды. Жабдық пен депозит ақша шығынына кіреді, бірақ операциялық нәтижеге кірмейді.</p>
       </section>
 
       <div class="insight-grid">
         <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">ЗП · ФОТ</span><h2>{{ isAll ? "Жобалар бойынша" : "Бөлімдер бойынша" }}</h2></div><button v-if="!isAll" type="button" class="text-button" :disabled="payroll.loading.value" @click="openPayroll">Payroll <ArrowRight :size="14" /></button></header>
+          <header><div><span class="eyebrow">Айлық · ФОТ</span><h2>Бөлімдер бойынша</h2></div><NuxtLink :to="ctx.payrollLink('/departments', project)" class="text-button">Айлық төлеміне <ArrowRight :size="14" /></NuxtLink></header>
           <dl class="stat-pairs">
             <div><dt>ФОТ барлығы</dt><dd>{{ money(summary.payroll.total) }}</dd></div>
             <div><dt>Адам саны</dt><dd>{{ formatCount(summary.payroll.headcount) }}</dd></div>
             <div><dt>Орташа айлық</dt><dd>{{ money(summary.payroll.average) }}</dd></div>
             <div><dt>Төленбеген</dt><dd :class="{ warn: summary.payroll.unpaid > 0 }">{{ money(summary.payroll.unpaid) }}</dd></div>
-            <div v-if="summary.payroll.advances"><dt>Оның ішінде аванс</dt><dd>{{ money(summary.payroll.advances) }}</dd></div>
+            <div v-if="summary.payroll.advances"><dt>Оның ішінде аванс (берілген)</dt><dd>{{ money(summary.payroll.advances) }}</dd></div>
             <div v-if="summary.payrollShare !== null"><dt>ФОТ / табыс</dt><dd>{{ formatPercent(summary.payrollShare) }}</dd></div>
           </dl>
           <ul v-if="payrollRows.length" class="bar-list">
             <li v-for="r in payrollRows" :key="r.name">
               <div><span>{{ r.name }}</span><small>{{ r.headcount }} адам</small><b>{{ money(r.amount) }}</b></div>
-              <span class="bar-track"><i :style="{ width: `${(r.amount / payrollMax) * 100}%`, background: r.color }" /></span>
+              <span class="bar-track"><i :style="{ width: `${(r.amount / payrollMax) * 100}%`, background: KIND_COLORS.salary }" /></span>
               <small v-if="r.unpaid > 0" class="bar-note">Төленбеген: {{ money(r.unpaid) }}</small>
             </li>
           </ul>
@@ -217,7 +215,7 @@ function exportRows() {
         </section>
 
         <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">Таргет</span><h2>Маркетинг воронкасы</h2></div><button v-if="!isAll" type="button" class="text-button" @click="addEntry({ category: 'marketing', name: 'Таргет', currency: 'USD', status: 'paid' })"><CirclePlus :size="14" /> Таргет қосу</button></header>
+          <header><div><span class="eyebrow">Таргет</span><h2>Маркетинг воронкасы</h2></div><button type="button" class="text-button" @click="finance.openEntry({ workspaceId: project, category: 'marketing', name: 'Таргет', currency: 'USD' })"><CirclePlus :size="14" /> Таргет қосу</button></header>
           <div class="funnel">
             <div><small>Шығын</small><strong>{{ money(summary.funnel.spend) }}</strong><em v-if="summary.funnel.spendUsd">$ {{ formatCount(summary.funnel.spendUsd, 2) }}</em></div>
             <div><small>Лидтер</small><strong>{{ formatCount(summary.funnel.leads) }}</strong><em>CPL {{ money(summary.funnel.cpl) }}</em></div>
@@ -226,15 +224,14 @@ function exportRows() {
           <dl class="stat-pairs">
             <div><dt>CAC — клиент тарту құны</dt><dd>{{ money(summary.funnel.cac) }}</dd></div>
             <div><dt>Маркетинг / табыс</dt><dd>{{ formatPercent(summary.marketingShare) }}</dd></div>
-            <div v-if="!isAll"><dt>ROMI {{ summary.unit.romiBasis === "ltv" ? "(LTV бойынша)" : "(1 ай)" }}</dt><dd>{{ formatPercent(summary.unit.romi, 0) }}</dd></div>
+            <div><dt>ROMI {{ summary.unit.romiBasis === "ltv" ? "(LTV бойынша)" : "(1 ай)" }}</dt><dd>{{ formatPercent(summary.unit.romi, 0) }}</dd></div>
           </dl>
-          <p v-if="!isAll && summary.funnel.spend && !summary.funnel.confirmed" class="panel-footnote">Таргет кезеңі мен лидтер кезеңі бірдей екені расталмаған.</p>
+          <NuxtLink :to="unitLink" class="text-button">Лид пен клиент санын енгізу <ArrowRight :size="14" /></NuxtLink>
         </section>
 
         <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">Юнит-экономика</span><h2>Бір {{ unitName }} есебі</h2></div><NuxtLink v-if="!isAll" :to="`/unit-economics?project=${project}&period=${period}`" class="text-button">Толығырақ <ArrowRight :size="14" /></NuxtLink></header>
-          <p v-if="isAll" class="panel-empty">Юнит-экономика әр жоба бойынша бөлек есептеледі — жобаны таңдаңыз.</p>
-          <dl v-else class="stat-pairs">
+          <header><div><span class="eyebrow">Юнит-экономика</span><h2>Бір {{ unitName }} есебі</h2></div><NuxtLink :to="unitLink" class="text-button">Толығырақ <ArrowRight :size="14" /></NuxtLink></header>
+          <dl class="stat-pairs">
             <div><dt>{{ unitTitle }} саны</dt><dd>{{ formatCount(summary.unit.units) }}</dd></div>
             <div><dt>ARPU — бір {{ unitName }} табысы</dt><dd>{{ money(summary.unit.arpu) }}</dd></div>
             <div><dt>Бір {{ unitName }} үшін шығын</dt><dd>{{ money(summary.unit.costPerUnit) }}</dd></div>
@@ -246,24 +243,24 @@ function exportRows() {
         </section>
       </div>
 
-      <section class="panel analytics-panel ledger">
-        <header><div><span class="eyebrow">Реестр</span><h2>Ақша қайда жұмсалды?</h2></div><button class="button secondary" type="button" @click="exportRows"><ArrowDownToLine :size="16" /> CSV</button></header>
-        <div class="finance-tabs" role="group" aria-label="Жазба түрі">
-          <button type="button" :class="{ active: view === 'actual' }" @click="view = 'actual'">Факт</button>
-          <button type="button" :class="{ active: view === 'plan' }" @click="view = 'plan'">Жоспар</button>
-          <button type="button" :class="{ active: view === 'review' }" @click="view = 'review'">Нақтылау керек ({{ reviewCount }})</button>
-          <button type="button" :class="{ active: view === 'duplicates' }" @click="view = 'duplicates'">Есептен тыс ({{ summary.duplicates }})</button>
+      <section id="ledger" class="panel analytics-panel ledger">
+        <header><div><span class="eyebrow">Реестр</span><h2>Барлық жазба</h2></div><div class="ledger-actions"><button class="button secondary" type="button" @click="finance.openEntry({ workspaceId: project })"><CirclePlus :size="16" /> Жазба</button><button class="button secondary" type="button" @click="exportRows"><ArrowDownToLine :size="16" /> CSV</button></div></header>
+        <div class="finance-tabs" role="group" aria-label="Шығын түрі">
+          <button type="button" :class="{ active: kindFilter === 'all' }" @click="kindFilter = 'all'">Барлығы ({{ kindCount("all") }})</button>
+          <button v-for="k in KIND_ORDER" :key="k" type="button" :class="{ active: kindFilter === k }" @click="kindFilter = k"><i class="group-dot" :style="{ background: KIND_COLORS[k] }" />{{ FINANCE_KINDS[k] }} ({{ kindCount(k) }})</button>
         </div>
         <div class="finance-filters">
           <input v-model="search" type="search" aria-label="Жазбаны іздеу" placeholder="Атауы, бөлімі немесе дереккөзі">
-          <select v-model="category" aria-label="Категория"><option value="all">Барлық санат</option><option v-for="(label, key) in FINANCE_CATEGORIES" :key="key" :value="key">{{ label }}</option></select>
+          <select v-model="category" aria-label="Санат"><option value="all">Барлық санат</option><option v-for="(label, key) in FINANCE_CATEGORIES" :key="key" :value="key">{{ label }}</option></select>
+          <select v-model="view" aria-label="Жазба күйі"><option value="actual">Факт</option><option value="plan">Жоспар</option><option value="review">Нақтылау керек ({{ reviewCount }})</option><option value="duplicates">Есептен тыс ({{ summary.duplicates }})</option></select>
+          <label class="finance-check owed-toggle"><input v-model="onlyOwed" type="checkbox"> Тек төленбегендер</label>
           <span>{{ rows.length }} жазба · {{ money(rows.reduce((a, r) => a + (r.amount ?? 0), 0)) }}</span>
         </div>
         <div v-if="!rows.length" class="finance-empty">Бұл сүзгі бойынша жазба жоқ.</div>
         <div class="finance-records">
           <article v-for="r in shownRows" :key="r.id" class="finance-record">
             <div>
-              <small><template v-if="isAll">{{ finance.nameOf(r.workspaceId) }} · </template>{{ FINANCE_CATEGORIES[r.category] }} · {{ originLabels[r.origin] }}</small>
+              <small><i class="group-dot" :style="{ background: KIND_COLORS[entryKind(r)] }" />{{ FINANCE_KINDS[entryKind(r)] }} · {{ FINANCE_CATEGORIES[r.category] }} · {{ originLabels[r.origin] }}</small>
               <h3>{{ r.name }}</h3>
               <details v-if="r.note || r.source || (r.basis === 'actual' && isOperatingCost(r.category) && r.category !== 'marketing')">
                 <summary>Толығырақ</summary>
@@ -276,17 +273,15 @@ function exportRows() {
             <div class="finance-record-money">
               <strong>{{ r.amount === null ? "Сома қажет" : money(r.amount) }}</strong>
               <small v-if="r.currency === 'USD' && r.currencyAmount">$ {{ formatCount(r.currencyAmount, 2) }} × {{ formatCount(r.fxRate, 2) }}</small>
-              <small v-if="r.basis === 'actual'" :class="`finance-status-${r.status}`">{{ statusLabels[r.status] }}</small>
+              <small v-if="r.basis === 'actual'" :class="isOutstanding(r) ? 'finance-status-unpaid' : 'finance-status-paid'">{{ statusLabel(r) }}</small>
               <small v-else>Жоспар</small>
             </div>
-            <button v-if="editable(r)" class="icon-button" type="button" :aria-label="`${r.name}: өзгерту`" @click="entryDraft = { ...r }"><Pencil :size="16" /></button>
-            <button v-else class="finance-live-link" type="button" :disabled="payroll.loading.value" @click="openLive(r)">Payroll ↗</button>
+            <button v-if="editable(r)" class="icon-button" type="button" :aria-label="`${r.name}: өзгерту`" @click="finance.entryDraft.value = { ...r }"><Pencil :size="16" /></button>
+            <NuxtLink v-else :to="livePath(r)" class="finance-live-link" :class="{ disabled: payroll.loading.value }">Ашу ↗</NuxtLink>
           </article>
         </div>
         <footer v-if="pages > 1" class="finance-pagination"><button class="button secondary" type="button" :disabled="page <= 1" @click="page--">Алдыңғы</button><span>{{ page }} / {{ pages }}</span><button class="button secondary" type="button" :disabled="page >= pages" @click="page++">Келесі</button></footer>
       </section>
     </template>
-
-    <FinanceEntryModal v-if="entryDraft" :entry="entryDraft" @close="entryDraft = null" @saved="entryDraft = null" />
   </div>
 </template>

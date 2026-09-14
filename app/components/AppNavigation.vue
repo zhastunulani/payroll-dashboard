@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { Building2, Calculator, Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, ShoppingBag, UsersRound, X } from "lucide-vue-next";
+import { Building2, Calculator, Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
+const ctx = useAppContext();
 const route = useRoute();
+// Reports cover all projects; Payroll operations work inside the profile chosen below.
 const links = [
-  { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "Талдау" },
-  { to: "/finance", label: "Жоба P&L", short: "P&L", icon: Building2, group: "Талдау" },
-  { to: "/unit-economics", label: "Юнит және таргет", short: "Юнит", icon: Calculator, group: "Талдау" },
-  { to: "/departments", label: "Айлық · бөлімдер", short: "Айлық", icon: UsersRound, group: "Payroll операциялары" },
-  { to: "/expenses", label: "Тұрақты шығындар", short: "Шығын", icon: ReceiptText, group: "Payroll операциялары" },
-  { to: "/other-expenses", label: "Басқа шығындар", short: "Реестр", icon: ShoppingBag, group: "Payroll операциялары" },
-  { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network, group: "Payroll операциялары" },
-  { to: "/settings", label: "Баптаулар", short: "Баптау", icon: Settings2, group: "Payroll операциялары" },
+  { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "analytics" },
+  { to: "/finance", label: "Жоба P&L", short: "P&L", icon: Building2, group: "analytics" },
+  { to: "/unit-economics", label: "Юнит және таргет", short: "Юнит", icon: Calculator, group: "analytics" },
+  { to: "/departments", label: "Айлық төлемі", short: "Айлық", icon: UsersRound, group: "payroll" },
+  { to: "/expenses", label: "Шығындар", short: "Шығын", icon: ReceiptText, group: "payroll" },
+  { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network, group: "payroll" },
+  { to: "/settings", label: "Баптаулар", short: "Баптау", icon: Settings2, group: "payroll" },
 ];
-const groups = [...new Set(links.map(link => link.group))].map(name => ({ name, links: links.filter(link => link.group === name) }));
+const groups = ["analytics", "payroll"].map(name => ({ name, links: links.filter(link => link.group === name) }));
+const isActive = (to: string) => route.path === to || (to === "/expenses" && route.path === "/other-expenses");
 const projectSheetOpen = ref(false);
 const longPressTriggered = ref(false);
 let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,8 +55,9 @@ onBeforeUnmount(stopSettingsHold);
     <NuxtLink to="/" class="app-logo"><span>A</span><div><strong>Айлық</strong><small>Finance OS</small></div></NuxtLink>
     <nav>
       <template v-for="group in groups" :key="group.name">
-        <span class="nav-caption">{{ group.name }}</span>
-        <NuxtLink v-for="link in group.links" :key="link.to" :to="link.to" :class="{ active: route.path === link.to }">
+        <span v-if="group.name === 'analytics'" class="nav-caption">Талдау · барлық жоба</span>
+        <span v-else class="nav-caption nav-project" :style="{ '--project': ctx.workspaceColor.value }"><i />Payroll · {{ ctx.workspace.value?.name || "жоба" }}</span>
+        <NuxtLink v-for="link in group.links" :key="link.to" :to="link.to" :class="{ active: isActive(link.to) }">
           <component :is="link.icon" :size="19" /><span>{{ link.label }}</span>
         </NuxtLink>
       </template>
@@ -67,7 +70,7 @@ onBeforeUnmount(stopSettingsHold);
   </aside>
 
   <nav class="mobile-navigation" aria-label="Негізгі навигация">
-    <NuxtLink v-for="link in links" :key="link.to" :to="link.to" :class="{ active: route.path === link.to }" @pointerdown="startSettingsHold(link.to)" @pointerup="stopSettingsHold" @pointercancel="stopSettingsHold" @pointerleave="stopSettingsHold" @contextmenu.prevent @click="handleNavigationClick($event, link.to)">
+    <NuxtLink v-for="link in links" :key="link.to" :to="link.to" :class="{ active: isActive(link.to) }" @pointerdown="startSettingsHold(link.to)" @pointerup="stopSettingsHold" @pointercancel="stopSettingsHold" @pointerleave="stopSettingsHold" @contextmenu.prevent @click="handleNavigationClick($event, link.to)">
       <component :is="link.icon" :size="20" /><span>{{ link.short }}</span>
     </NuxtLink>
   </nav>

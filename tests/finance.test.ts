@@ -7,7 +7,30 @@ test("no data is not zero revenue, tax or advertising",()=>{
 });
 test("separates payments, budget, review and duplicate records",()=>{
   const s=summarizeFinance([entry(100),entry(30,{status:"unpaid"}),entry(20,{status:"unknown"}),entry(500,{basis:"plan"}),entry(999,{disposition:"review"}),entry(999,{disposition:"duplicate"}),entry(null)],EMPTY_FINANCE_METRICS);
-  assert.equal(s.cost,150);assert.equal(s.paid,100);assert.equal(s.unpaid,30);assert.equal(s.unknown,20);assert.equal(s.plan,500);assert.equal(s.review,1);assert.equal(s.duplicates,1);assert.equal(s.missingAmounts,1);assert.equal(s.profit,null);
+  // Only an explicit «unpaid» is owed; spending without a confirmed status was already spent.
+  assert.equal(s.cost,150);assert.equal(s.paid,120);assert.equal(s.unpaid,30);assert.equal(s.plan,500);assert.equal(s.review,1);assert.equal(s.duplicates,1);assert.equal(s.missingAmounts,1);assert.equal(s.profit,null);
+});
+test("salaries and mandatory payments are obligations; one-time and advertising are spent money",()=>{
+  const rows=[
+    entry(300,{id:"salary:1",origin:"salary",status:"paid"}),
+    entry(200,{id:"salary:2",origin:"salary",status:"unpaid"}),
+    entry(50,{id:"advance:2",origin:"salary",status:"paid"}),
+    entry(1000,{id:"expense:rent",origin:"expense",category:"rent",status:"unpaid"}),
+    entry(150,{id:"expense:net",origin:"expense",category:"services",status:"paid"}),
+    entry(400,{id:"expense:desk",origin:"expense",category:"equipment",status:"unpaid",oneTime:true}),
+    entry(700,{id:"import:ads",origin:"import",category:"marketing",status:"unknown"}),
+    entry(80,{id:"import:event",origin:"import",category:"events",status:"unknown"}),
+  ];
+  const s=summarizeFinance(rows,EMPTY_FINANCE_METRICS);
+  assert.deepEqual(s.kinds.salary,{total:550,paid:350,unpaid:200,count:3,unpaidCount:1});
+  assert.deepEqual(s.kinds.mandatory,{total:1150,paid:150,unpaid:1000,count:2,unpaidCount:1});
+  assert.deepEqual(s.kinds.target,{total:700,paid:700,unpaid:0,count:1,unpaidCount:0});
+  assert.deepEqual(s.kinds.other,{total:480,paid:480,unpaid:0,count:2,unpaidCount:0});
+  assert.deepEqual(s.obligations,{total:1700,paid:500,unpaid:1200,share:500/1700});
+  assert.equal(s.unpaid,1200);assert.equal(s.paid,1680);assert.equal(s.cost,2880);
+  assert.equal(s.payroll.paid,350);assert.equal(s.payroll.unpaid,200);
+  const codes=financeIssues(s,EMPTY_FINANCE_METRICS,{payrollMonth:true,closed:false}).map(i=>i.code);
+  assert.ok(codes.includes("unpaid-salary")&&codes.includes("unpaid-mandatory"));assert.ok(!codes.includes("unpaid-other"));
 });
 test("equipment and deposits affect cash but not operating profit",()=>{
   const s=summarizeFinance([entry(100),entry(200,{category:"equipment"}),entry(300,{category:"deposit"})],{...EMPTY_FINANCE_METRICS,revenue:1000,receipts:800});
@@ -41,7 +64,7 @@ test("groups costs into a management P&L and payroll by department",()=>{
   const rows=[
     entry(300,{id:"salary:1",origin:"salary",group:"Академ",status:"paid"}),
     entry(200,{id:"salary:2",origin:"salary",group:"Академ",status:"unpaid"}),
-    entry(50,{id:"advance:2",origin:"salary",group:"Академ",status:"unknown"}),
+    entry(50,{id:"advance:2",origin:"salary",group:"Академ",status:"paid"}),
     entry(0,{id:"salary:3",origin:"salary",group:"Сату"}),
     entry(400,{category:"rent"}),entry(100,{category:"marketing"}),entry(70,{category:"tax"}),entry(900,{category:"equipment"}),
   ];
@@ -72,7 +95,7 @@ test("data-quality checklist names what blocks a reliable report",()=>{
   const codes=financeIssues(summarizeFinance(rows,EMPTY_FINANCE_METRICS),EMPTY_FINANCE_METRICS,{payrollMonth:true,closed:true});
   const byCode=Object.fromEntries(codes.map(i=>[i.code,i]));
   assert.equal(byCode["no-revenue"]?.level,"critical");assert.equal(byCode["unpaid-salary"]?.level,"critical");assert.equal(byCode["unpaid-salary"]?.amount,200);
-  assert.ok(byCode["no-leads"]&&byCode["no-customers"]&&byCode["no-tax"]);
+  assert.ok(byCode["no-leads"]&&byCode["no-customers"]&&byCode["no-tax"]);assert.equal(byCode["unknown-status"],undefined);
   const clean=financeIssues(summarizeFinance([entry(100,{category:"tax"})],{...EMPTY_FINANCE_METRICS,revenue:500,units:5}),{...EMPTY_FINANCE_METRICS,revenue:500,units:5},{payrollMonth:true,closed:false});
   assert.deepEqual(clean,[]);
 });

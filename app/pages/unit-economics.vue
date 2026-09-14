@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { CirclePlus, RefreshCw, Save } from "lucide-vue-next";
-import { EMPTY_FINANCE_METRICS, type FinanceEntry, type FinanceMetrics, type FinanceSummary } from "../../lib/finance";
+import { CirclePlus, Save } from "lucide-vue-next";
+import { EMPTY_FINANCE_METRICS, type FinanceMetrics, type FinanceSummary } from "../../lib/finance";
 
 const route = useRoute();
 const finance = useFinance();
 const { projects, summaries, total, period } = finance;
 onMounted(finance.load);
 
-const focus = typeof route.query.project === "string" ? route.query.project : "";
+// A link like #metrics-<project> highlights and opens that project's form.
+const focus = computed(() => route.hash.startsWith("#metrics-") ? route.hash.slice("#metrics-".length) : "");
 const drafts = reactive<Record<string, FinanceMetrics>>({});
 const saving = reactive<Record<string, boolean>>({});
 const messages = reactive<Record<string, { ok: boolean; text: string } | undefined>>({});
-const entryDraft = ref<Partial<FinanceEntry> | null>(null);
 
 // Fresh data replaces a form only when the month changed or the form has no unsaved edits,
 // so saving one project never discards what was typed in another.
@@ -30,9 +30,10 @@ watch(() => finance.data.value, data => {
     baselines[p.id] = JSON.stringify(next);
   }
 }, { immediate: true });
-onMounted(() => {
-  if (focus) nextTick(() => document.getElementById(`metrics-${focus}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-});
+// A link like #metrics-<project> opens the form of that project.
+watch(() => finance.data.value, data => {
+  if (data && route.hash.startsWith("#metrics-")) nextTick(() => document.getElementById(route.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}, { immediate: true });
 
 const fields: Array<{ key: keyof FinanceMetrics; label: string; hint: string; money?: boolean; step?: string }> = [
   { key: "revenue", label: "Табыс, ₸", hint: "Осы айда танылған (есептелген) табыс", money: true },
@@ -56,7 +57,7 @@ async function save(id: string) {
   messages[id] = error ? { ok: false, text: error } : { ok: true, text: "Сақталды — барлық есеп жаңартылды." };
 }
 function addTarget(workspaceId: string) {
-  entryDraft.value = { workspaceId, period: period.value, name: "Таргет", category: "marketing", amount: null, basis: "actual", status: "paid", disposition: "included", source: "Жарнама кабинеті", note: "", relatedId: "", currency: "USD" };
+  finance.openEntry({ workspaceId, name: "Таргет", category: "marketing", source: "Жарнама кабинеті", currency: "USD" });
 }
 
 type Row = { label: string; hint?: string; value: (s: FinanceSummary, id: string | null) => string; tone?: (s: FinanceSummary) => string };
@@ -100,17 +101,7 @@ const chart = computed(() => {
 
 <template>
   <div class="analytics-page">
-    <header class="analytics-header">
-      <div>
-        <span class="eyebrow">Бизнес-модель</span>
-        <h1>Юнит-экономика және таргет</h1>
-        <p>Бір оқушы қанша әкеледі, қаншаға тартылады және қашан өтеледі</p>
-      </div>
-      <div class="analytics-actions">
-        <FinancePeriodControl />
-        <button class="button secondary icon-only" type="button" aria-label="Жаңарту" :disabled="finance.loading.value" @click="finance.load"><RefreshCw :size="17" :class="{ spin: finance.loading.value }" /></button>
-      </div>
-    </header>
+    <AnalyticsHeader />
 
     <p v-if="finance.error.value" class="finance-error" role="alert">{{ finance.error.value }}</p>
     <div v-if="!finance.data.value" class="analytics-skeleton" aria-busy="true"><i v-for="n in 4" :key="n" /></div>
@@ -193,6 +184,5 @@ const chart = computed(() => {
       </section>
     </template>
 
-    <FinanceEntryModal v-if="entryDraft" :entry="entryDraft" @close="entryDraft = null" @saved="entryDraft = null" />
   </div>
 </template>

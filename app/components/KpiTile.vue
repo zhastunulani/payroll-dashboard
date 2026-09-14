@@ -8,7 +8,9 @@ const props = withDefaults(defineProps<{
   delta?: number | null;
   goodWhen?: "up" | "down" | "neutral";
   tone?: "default" | "brand" | "success" | "danger";
-}>(), { sub: "", delta: undefined, goodWhen: "down", tone: "default" });
+  /** Paid share of an obligation (0..1); shown as a meter under the value. */
+  progress?: number | null;
+}>(), { sub: "", delta: undefined, goodWhen: "down", tone: "default", progress: null });
 
 const direction = computed(() => props.delta === null || props.delta === undefined || Math.abs(props.delta) < 0.0005 ? "flat" : props.delta > 0 ? "up" : "down");
 const quality = computed(() => direction.value === "flat" || props.goodWhen === "neutral" ? "neutral" : direction.value === props.goodWhen ? "good" : "bad");
@@ -24,6 +26,7 @@ const deltaText = computed(() => props.delta === null || props.delta === undefin
       </span>
     </div>
     <strong class="kpi-value">{{ value }}</strong>
+    <span v-if="progress !== null" class="meter kpi-meter" role="img" :aria-label="`Төленді ${Math.round(progress * 100)}%`"><i :style="{ width: `${Math.min(100, progress * 100)}%` }" /></span>
     <small class="kpi-sub">{{ sub }}</small>
   </article>
 </template>

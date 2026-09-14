@@ -1,29 +1,23 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, CopyPlus, Download, Plus, ReceiptText, UsersRound, WalletCards } from "lucide-vue-next";
-import { shouldCopyDepartmentToNewMonth, nextAvailableMonthId } from "../../lib/months";
-import type { PayrollData } from "../../lib/types";
+import { CalendarPlus, ChevronLeft, ChevronRight, Download, Info, X } from "lucide-vue-next";
 
+/** Header of the Payroll operations: which profile (project) and which opened month. */
 const payroll = usePayroll();
 const route = useRoute();
-const { formatMoney } = useFormatters();
+const ctx = useAppContext();
 const monthModal = ref(false);
+const monthTarget = ref<string | undefined>();
 const exportModal = ref(false);
-const sourceMonthId = ref("");
-const targetMonthId = ref("");
-const copyRecurring = ref(true);
-const preview = ref<PayrollData | null>(null);
-const previewLoading = ref(false);
+const requestedMonth = useState<string | null>("payroll:requested-month", () => null);
 
 const titles: Record<string, { eyebrow: string; title: string; text: string }> = {
-  "/": { eyebrow: "Басқару панелі", title: "Қаржылық шолу", text: "Жоспар, төлем және айлық динамика" },
-  "/departments": { eyebrow: "Команда", title: "Бөлімдердің айлығы", text: "Әр бөлімнің жалақы қорын басқарыңыз" },
-  "/expenses": { eyebrow: "Операциялар", title: "Тұрақты шығындар", text: "Аренда, интернет және сервистер" },
-  "/other-expenses": { eyebrow: "Реестр", title: "Жұмсалған ақша", text: "Бір реттік сатып алулар мен шығындар" },
-  "/unit-economics": { eyebrow: "Бизнес-модель", title: "Юнит-экономика", text: "Бір клиент, тапсырыс немесе қызметтің пайдасын есептеңіз" },
+  "/departments": { eyebrow: "Айлық төлемі", title: "Айлық төлемі", text: "Кімге қанша төлеу керек, кім алды — бөлімдер бойынша" },
+  "/expenses": { eyebrow: "Шығындар", title: "Шығындар", text: "Міндетті төлемдер (аренда, интернет, подписка) және бір реттік шығындар" },
+  "/other-expenses": { eyebrow: "Шығындар", title: "Шығындар", text: "Міндетті төлемдер және бір реттік шығындар" },
   "/smz": { eyebrow: "Төлем маршруты", title: "SMZ бойынша бөлу", text: "Айлықтарды лимит пен қызметтік деңгейге сай бөліңіз" },
   "/settings": { eyebrow: "Жүйе", title: "Баптаулар", text: "Айлар, команда және анықтамалықтар" },
 };
-const heading = computed(() => titles[route.path] ?? titles["/"]!);
+const heading = computed(() => titles[route.path] ?? titles["/departments"]!);
 const monthOptions = computed(() => payroll.data.value?.months.map(item => ({
   value: item.id,
   label: item.label,
@@ -33,59 +27,29 @@ const monthOptions = computed(() => payroll.data.value?.months.map(item => ({
 const currentIndex = computed(() => payroll.data.value?.months.findIndex(item => item.id === payroll.data.value?.selectedMonth.id) ?? -1);
 const canOlder = computed(() => currentIndex.value >= 0 && currentIndex.value < (payroll.data.value?.months.length || 0) - 1);
 const canNewer = computed(() => currentIndex.value > 0);
-const copyableEmployees = computed(() => preview.value?.departments.filter(department => shouldCopyDepartmentToNewMonth(department.id, department.name)).reduce((sum, department) => sum + department.employees.length, 0) || 0);
-const copyableSalary = computed(() => preview.value?.departments.filter(department => shouldCopyDepartmentToNewMonth(department.id, department.name)).reduce((sum, department) => sum + department.total, 0) || 0);
-const recurringExpenses = computed(() => preview.value?.expenses.filter(expense => expense.isRecurring) || []);
+const missingMonth = computed(() => requestedMonth.value && payroll.data.value && payroll.data.value.selectedMonth.id !== requestedMonth.value ? requestedMonth.value : null);
 
 function chooseMonth(month: string) {
+  requestedMonth.value = null;
   if (month !== payroll.data.value?.selectedMonth.id) payroll.load(month);
 }
 function move(offset: number) {
   const target = payroll.data.value?.months[currentIndex.value + offset];
-  if (target) payroll.load(target.id);
+  if (target) chooseMonth(target.id);
 }
-function openMonth() {
-  const data = payroll.data.value;
-  if (!data) return;
-  sourceMonthId.value = data.selectedMonth.id;
-  targetMonthId.value = nextAvailableMonthId(sourceMonthId.value, data.months.map(item => item.id));
-  copyRecurring.value = true;
-  preview.value = data;
+function openMonth(target?: string) {
+  monthTarget.value = target;
   monthModal.value = true;
-}
-async function loadPreview() {
-  const data = payroll.data.value;
-  if (!data) return;
-  targetMonthId.value = nextAvailableMonthId(sourceMonthId.value, data.months.map(item => item.id));
-  if (sourceMonthId.value === data.selectedMonth.id) {
-    preview.value = data;
-    return;
-  }
-  previewLoading.value = true;
-  try {
-    preview.value = await $fetch<PayrollData>("/api/payroll", {
-      query: {
-        month: sourceMonthId.value,
-        workspace: data.selectedWorkspace.id,
-      },
-    });
-  } finally {
-    previewLoading.value = false;
-  }
-}
-async function createMonth() {
-  const saved = await payroll.mutate("createMonth", {
-    newMonthId: targetMonthId.value,
-    sourceMonthId: sourceMonthId.value,
-    copyRecurringExpenses: copyRecurring.value,
-  });
-  if (saved) monthModal.value = false;
 }
 </script>
 
 <template>
-  <header class="period-header">
-    <div class="page-heading"><span class="eyebrow">{{ heading.eyebrow }}</span><h1>{{ heading.title }}</h1><p>{{ heading.text }}</p></div>
+  <header class="period-header payroll-header" :style="{ '--project': ctx.workspaceColor.value }">
+    <div class="page-heading">
+      <span class="eyebrow context-eyebrow"><i />{{ payroll.data.value?.selectedWorkspace.name }} · {{ heading.eyebrow }}</span>
+      <h1>{{ heading.title }}</h1>
+      <p>{{ heading.text }}</p>
+    </div>
     <div v-if="payroll.data.value" class="period-controls">
       <div class="month-control">
         <button type="button" aria-label="Алдыңғы ай" :disabled="!canOlder" @click="move(1)"><ChevronLeft :size="18" /></button>
@@ -99,25 +63,16 @@ async function createMonth() {
         <button type="button" aria-label="Келесі ай" :disabled="!canNewer" @click="move(-1)"><ChevronRight :size="18" /></button>
       </div>
       <button class="button secondary export-button" type="button" @click="exportModal = true"><Download :size="17" /><span>Ведомость</span></button>
-      <button class="button primary new-month-button" type="button" @click="openMonth"><Plus :size="18" /><span><strong>Жаңа ай</strong><small>Есепті көшіру</small></span></button>
+      <button class="button primary new-month-button" type="button" @click="openMonth()"><CalendarPlus :size="18" /><span><strong>Жаңа ай</strong><small>Есепті көшіру</small></span></button>
     </div>
   </header>
+  <div v-if="missingMonth && payroll.data.value" class="gate-banner" role="status">
+    <Info :size="17" />
+    <span>{{ payroll.data.value.selectedWorkspace.name }}: <b>{{ periodLabel(missingMonth) }}</b> әлі ашылмаған, сондықтан <b>{{ payroll.data.value.selectedMonth.label }}</b> көрсетілді.</span>
+    <button class="button secondary" type="button" @click="openMonth(missingMonth)"><CalendarPlus :size="16" /> Айды ашу</button>
+    <button class="icon-button" type="button" aria-label="Жабу" @click="requestedMonth = null"><X :size="16" /></button>
+  </div>
 
-  <UiModal v-if="monthModal" title="Жаңа есептік ай" description="Кез келген айды негізге алып, жаңа есеп құрыңыз" wide @close="monthModal = false">
-    <form class="form-stack" @submit.prevent="createMonth">
-      <div class="form-grid two">
-        <label class="form-field"><span>Негіз болатын ай</span><UiSmartSelect v-model="sourceMonthId" :options="monthOptions" search-placeholder="Айды іздеу" @update:model-value="loadPreview" /></label>
-        <label class="form-field"><span>Құрылатын ай</span><input v-model="targetMonthId" type="month" min="2020-01" max="2100-12" required /></label>
-      </div>
-      <div class="copy-summary" :class="{ loading: previewLoading }">
-        <div><span><UsersRound :size="19" /></span><small>Көшірілетін команда</small><strong>{{ copyableEmployees }} адам</strong><em>Кураторлар мен Сату бөлімі бос ашылады</em></div>
-        <div><span><WalletCards :size="19" /></span><small>Айлық қоры</small><strong>{{ formatMoney(copyableSalary) }}</strong></div>
-        <div><span><ReceiptText :size="19" /></span><small>Тұрақты шығындар</small><strong>{{ formatMoney(recurringExpenses.reduce((sum, item) => sum + item.amount, 0)) }}</strong><em>{{ recurringExpenses.length }} жазба</em></div>
-      </div>
-      <label class="check-card"><input v-model="copyRecurring" type="checkbox" /><span><strong>Тұрақты шығындарды көшіру</strong><small>Аренда, интернет және ай сайынғы сервистер</small></span></label>
-      <div class="inline-note"><CopyPlus :size="18" /><span>Қызметкерлердің айлықтары мен компоненттері көшіріледі. Барлық «Төленді» белгілері жаңадан басталады.</span></div>
-      <div class="modal-actions"><button type="button" class="button ghost" @click="monthModal = false">Болдырмау</button><button class="button primary" :disabled="payroll.saving.value || previewLoading">{{ payroll.saving.value ? "Құрылуда…" : "Айды құру" }}</button></div>
-    </form>
-  </UiModal>
+  <MonthCreateModal v-if="monthModal" :target="monthTarget" @close="monthModal = false; requestedMonth = null" />
   <PayrollExportModal v-if="exportModal" @close="exportModal = false" />
 </template>

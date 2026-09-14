@@ -5,7 +5,8 @@ import { FINANCE_CATEGORIES, type FinanceEntry } from "../../lib/finance";
 const props = defineProps<{ entry: Partial<FinanceEntry> }>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 const finance = useFinance();
-const form = ref<Partial<FinanceEntry>>({ currency: "KZT", ...props.entry });
+// Older imported rows carry an «unknown» status; for the owner that money is simply spent.
+const form = ref<Partial<FinanceEntry>>({ currency: "KZT", ...props.entry, status: props.entry.status === "unpaid" ? "unpaid" : "paid" });
 const saving = ref(false);
 const error = ref("");
 const isNew = computed(() => !props.entry.id);
@@ -31,7 +32,7 @@ async function remove() {
 </script>
 
 <template>
-  <UiModal :title="isNew ? 'Жаңа қаржылық жазба' : 'Жазбаны өзгерту'" description="Payroll-да жоқ шығындар: таргет, салық, мердігер, жабдық. Payroll-дағы жазбаны қайталамаңыз." wide @close="!saving && emit('close')">
+  <UiModal :title="isNew ? 'Жаңа қаржылық жазба' : 'Жазбаны өзгерту'" description="Таргет, жабдық, іс-шара, мердігер сияқты шығындар. Айлық пен міндетті төлемдер өз беттерінде енгізіледі — оларды мұнда қайталамаңыз." wide @close="!saving && emit('close')">
     <form class="form-grid two entry-form" @submit.prevent="save">
       <label class="form-field">Жоба<select v-model="form.workspaceId" required><option v-for="p in finance.projects.value" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
       <label class="form-field">Есептік ай<input v-model="form.period" type="month" required></label>
@@ -50,7 +51,7 @@ async function remove() {
       </template>
       <label v-else class="form-field">Сома, ₸<input v-model="form.amount" type="number" min="0" step="0.01" placeholder="Белгісіз болса бос қалдырыңыз"></label>
       <label class="form-field">Факт / жоспар<select v-model="form.basis"><option value="actual">Факт</option><option value="plan">Жоспар (бюджет)</option></select></label>
-      <label class="form-field">Төлем күйі<select v-model="form.status"><option value="paid">Төленген</option><option value="unpaid">Төленбеген</option><option value="unknown">Расталмаған</option></select></label>
+      <label class="form-field">Төлем<select v-model="form.status"><option value="paid">Жұмсалды (төленді)</option><option value="unpaid">Әлі төленуі керек</option></select></label>
       <label class="form-field wide">Есепке қосу<select v-model="form.disposition"><option value="included">Есепке қосылады</option><option value="review">Нақтылау керек — қосылмайды</option><option value="duplicate">Қайталама / есептен тыс — қосылмайды</option></select></label>
       <label class="form-field wide">Дереккөз<input v-model="form.source" maxlength="1000" placeholder="Чек, шот, Meta Ads есебі…"></label>
       <label class="form-field wide">Түсіндірме<textarea v-model="form.note" rows="3" maxlength="3000" /></label>

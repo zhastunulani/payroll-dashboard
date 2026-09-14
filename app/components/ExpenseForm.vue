@@ -46,7 +46,7 @@ async function save() {
 </script>
 
 <template>
-  <UiModal :title="expense ? 'Шығынды өзгерту' : oneTime ? 'Жаңа шығын' : isSubscription ? 'Жаңа подписка' : 'Операциялық шығын қосу'" :description="oneTime ? 'Сома жұмсалған ақша ретінде бірден реестрге кіреді' : isSubscription ? 'Әр сервис немесе лицензияны жеке тіркеңіз' : 'Жоспарланған шығын және оның төлем статусы'" @close="emit('close')">
+  <UiModal :title="expense ? 'Шығынды өзгерту' : oneTime ? 'Жаңа шығын' : isSubscription ? 'Жаңа подписка' : 'Міндетті төлем қосу'" :description="oneTime ? 'Сома жұмсалған ақша ретінде бірден реестрге кіреді' : isSubscription ? 'Әр сервис немесе лицензияны жеке тіркеңіз' : 'Ай сайын төленетін шығын және оның төлем статусы'" @close="emit('close')">
     <form class="form-stack" @submit.prevent="save">
       <div class="form-symbol"><ShoppingBag v-if="oneTime" :size="22" /><ReceiptText v-else :size="22" /></div>
       <label class="form-field"><span>{{ isSubscription ? "Не алынды?" : "Шығын атауы" }}</span><input v-model="name" :placeholder="isSubscription ? 'Мысалы: ChatGPT Team немесе Canva Pro' : 'Мысалы: Кеңсе арендасы'" required /></label>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Building2, Calculator, Check, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
+import { Building2, Calculator, Check, Landmark, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const ctx = useAppContext();
@@ -9,6 +9,7 @@ const links = [
   { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "analytics" },
   { to: "/finance", label: "Жоба P&L", short: "P&L", icon: Building2, group: "analytics" },
   { to: "/unit-economics", label: "Юнит және таргет", short: "Юнит", icon: Calculator, group: "analytics" },
+  { to: "/bank", label: "Банк выпискалары", short: "Банк", icon: Landmark, group: "analytics" },
   { to: "/departments", label: "Айлық төлемі", short: "Айлық", icon: UsersRound, group: "payroll" },
   { to: "/expenses", label: "Шығындар", short: "Шығын", icon: ReceiptText, group: "payroll" },
   { to: "/smz", label: "SMZ бөлу", short: "SMZ", icon: Network, group: "payroll" },

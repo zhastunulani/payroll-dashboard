@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarizeFinance, consolidateFinance, EMPTY_FINANCE_METRICS, normalizeFinanceMetrics, normalizeFinanceEntry, optionalAmount, financePeriod, classifyFinanceCost, periodWindow, trendPoint, financeIssues, type FinanceEntry } from "../lib/finance.ts";
+import { summarizeFinance, consolidateFinance, EMPTY_FINANCE_METRICS, normalizeFinanceMetrics, normalizeFinanceEntry, optionalAmount, financePeriod, classifyFinanceCost, importedCategory, entryKind, periodWindow, trendPoint, financeIssues, type FinanceEntry } from "../lib/finance.ts";
 const entry=(amount:number|null,extra:Partial<FinanceEntry>={}):FinanceEntry=>({id:"test",workspaceId:"a",period:"2026-08",name:"Test",category:"payroll",amount,basis:"actual",status:"paid",disposition:"included",source:"",note:"",relatedId:"",origin:"manual",updatedAt:"",...extra});
 test("no data is not zero revenue, tax or advertising",()=>{
   const s=summarizeFinance([],EMPTY_FINANCE_METRICS);assert.equal(s.revenue,null);assert.equal(s.profit,null);assert.equal(s.tax,null);assert.equal(s.marketing,null);assert.equal(s.plan,null);assert.equal(s.cpl,null);
@@ -127,4 +127,32 @@ test("per-entry cost behavior changes unit economics without duplicating payroll
   const m={...EMPTY_FINANCE_METRICS,revenue:1000,units:10,costsReviewed:true};
   const s=summarizeFinance([entry(200,{costBehavior:"variable"}),entry(300,{id:"fixed",costBehavior:"fixed"})],m);
   assert.equal(s.cost,500);assert.equal(s.unitContribution,80);assert.equal(s.breakEvenUnits,4);
+});
+test("only Facebook / Instagram spend is target; offline advertising is a one-time purchase",()=>{
+  assert.equal(classifyFinanceCost("Meta таргет"),"marketing");assert.equal(classifyFinanceCost("Instagram продвижение"),"marketing");
+  assert.equal(classifyFinanceCost("ИП Билборд","Жарнама"),"promo");assert.equal(classifyFinanceCost("Вывеска(лого)"),"promo");
+  assert.equal(classifyFinanceCost("Роллап"),"promo");assert.equal(classifyFinanceCost("Брошюра кзо"),"promo");
+  assert.equal(classifyFinanceCost("Распечатка бумаг"),"office");assert.equal(classifyFinanceCost("Смета ремонта"),"other");
+  const imported=(name:string,note="",currency:"KZT"|"USD"="KZT")=>importedCategory({origin:"import",category:"marketing",name,note,currency});
+  assert.equal(imported("Баннер"),"promo");assert.equal(imported("Кабинетке табличка"),"promo");
+  assert.equal(imported("Таргет / жарнама"),"marketing");assert.equal(imported("EDUSER ONLINE: 01.08–31.08","Бұрынғы таргет сомасының орнына"),"marketing");
+  assert.equal(imported("Ads","","USD"),"marketing");
+  assert.equal(importedCategory({origin:"manual",category:"marketing",name:"Реклама",note:"",currency:"KZT"}),"marketing");
+  const s=summarizeFinance([entry(500,{origin:"import",category:"promo"}),entry(200,{origin:"import",category:"marketing"})],{...EMPTY_FINANCE_METRICS,leads:10});
+  assert.equal(entryKind({origin:"import",category:"promo"}),"other");
+  assert.equal(s.kinds.target.total,200);assert.equal(s.kinds.other.total,500);assert.equal(s.funnel.cpl,20);
+});
+
+test("bank statements are the revenue when they cover the month; the manual figure is the fallback",()=>{
+  const entries=[entry(300,{category:"payroll"}),entry(100,{category:"rent"})];
+  const manual={...EMPTY_FINANCE_METRICS,revenue:900,units:10};
+  const bank={gross:1200,refunds:100,commission:50,tax:null,net:1050,sales:6,avgCheck:200,credited:null};
+  const withBank=summarizeFinance(entries,manual,bank);
+  assert.equal(withBank.revenue,1050);assert.equal(withBank.revenueSource,"bank");assert.equal(withBank.manualRevenue,900);
+  assert.equal(withBank.profit,650);assert.equal(withBank.unit.arpu,105);
+  assert.equal(withBank.unit.profitPerSale,650/6);assert.equal(withBank.unit.breakEvenSales,Math.ceil(400/(1050/6)));
+  const without=summarizeFinance(entries,manual);
+  assert.equal(without.revenue,900);assert.equal(without.revenueSource,"manual");assert.equal(without.unit.sales,null);
+  const total=consolidateFinance([{entries,metrics:manual,bank},{entries:[entry(10)],metrics:{...EMPTY_FINANCE_METRICS,revenue:50}}]);
+  assert.equal(total.revenue,1100);assert.equal(total.bank?.gross,1200);
 });

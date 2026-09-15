@@ -1,7 +1,8 @@
 export const FINANCE_CATEGORIES = {
   payroll: "Айлық / ФОТ",
   contractors: "Мердігерлер және контент",
-  marketing: "Маркетинг / таргет",
+  marketing: "Таргет (Facebook / Instagram)",
+  promo: "Сыртқы жарнама және баспа",
   tax: "Салық және аударымдар",
   rent: "Аренда",
   services: "Сервистер және байланыс",
@@ -29,6 +30,7 @@ export type CostGroup = keyof typeof COST_GROUPS;
 const CATEGORY_GROUP: Record<Exclude<FinanceCategory, "revenue">, CostGroup> = {
   payroll: "payroll",
   marketing: "marketing",
+  promo: "opex",
   tax: "tax",
   contractors: "opex",
   rent: "opex",
@@ -50,7 +52,7 @@ const CATEGORY_GROUP: Record<Exclude<FinanceCategory, "revenue">, CostGroup> = {
 export const FINANCE_KINDS = {
   salary: "Айлық",
   mandatory: "Міндетті төлемдер",
-  target: "Таргет / жарнама",
+  target: "Таргет (Facebook)",
   other: "Басқа шығындар",
 } as const;
 export type FinanceKind = keyof typeof FINANCE_KINDS;
@@ -58,7 +60,7 @@ export const KIND_ORDER: FinanceKind[] = ["salary", "mandatory", "target", "othe
 
 /** P&L presentation order: team, acquisition, operations, taxes, then capital below the line. */
 export const PNL_ORDER: Array<Exclude<FinanceCategory, "revenue">> = [
-  "payroll", "contractors", "marketing", "variable", "rent", "services",
+  "payroll", "contractors", "marketing", "promo", "variable", "rent", "services",
   "office", "travel", "events", "other", "tax", "equipment", "deposit",
 ];
 
@@ -120,6 +122,21 @@ export const isOperatingCost = (category: FinanceCategory) =>
 
 export function categoryGroup(category: FinanceCategory): CostGroup | null {
   return category === "revenue" ? null : CATEGORY_GROUP[category];
+}
+
+/** Paid social advertising: the only spending that counts as «Таргет». */
+export function isFacebookTarget(text: string): boolean {
+  return /таргет|target|facebook|фейсбук|инстаграм|instagram|\bmeta\b|\bfb\b|ads manager/i.test(text);
+}
+
+/**
+ * Imported rows were once filed as marketing for any advertising. Only Facebook / Instagram target stays
+ * «Таргет»; offline advertising (billboards, banners, signs, print) becomes a one-time purchase.
+ * Manually entered rows keep the category the owner chose.
+ */
+export function importedCategory(e: Pick<FinanceEntry, "origin" | "category" | "name" | "note" | "currency">): FinanceCategory {
+  if (e.origin !== "import" || e.category !== "marketing" || e.currency === "USD") return e.category;
+  return isFacebookTarget(`${e.name} ${e.note}`) ? "marketing" : "promo";
 }
 
 export function entryKind(e: Pick<FinanceEntry, "origin" | "category" | "oneTime">): FinanceKind {
@@ -225,7 +242,9 @@ export function classifyFinanceCost(name: string, category = ""): FinanceCategor
   if (/депозит/.test(value)) return "deposit";
   if (/налог|салық|соц.*аударым/.test(value)) return "tax";
   if (/парта|стуль|орындық|мебель|панель|жиһаз/.test(value)) return "equipment";
-  if (/таргет|жарнама|реклам|билборд|баннер|банер|роллап|брошюр/.test(value)) return "marketing";
+  // «Таргет» is only paid social advertising (Facebook / Instagram); billboards, banners, signs and print are one-time purchases.
+  if (isFacebookTarget(value)) return "marketing";
+  if (/жарнама|реклам|билборд|баннер|банер|роллап|брошюр|вывеск|табличк|листовк|флаер|визитк/.test(value)) return "promo";
   if (/аренда/.test(value)) return "rent";
   if (/подписк|интернет|wifi|wi-fi|wazz|вазз|срм|crm|тариф/.test(value)) return "services";
   if (/билет|іссапар|прожив|питание/.test(value)) return "travel";
@@ -252,7 +271,12 @@ export type CategoryLine = {
 
 export type FinanceSummary = ReturnType<typeof summarizeFinance>;
 
-export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetrics) {
+/** Receipts confirmed by bank statements for one project-month (from lib/bank.ts). */
+export interface BankFacts { gross: number; refunds: number; commission: number; tax: number | null; net: number; sales: number; avgCheck: number | null; credited: number | null; sources?: string[] }
+/** Where the month's revenue comes from: bank statements win over the manual form, which wins over ledger rows. */
+export type RevenueSource = "bank" | "manual" | "ledger" | null;
+
+export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null) {
   const included = entries.filter(e => e.disposition === "included" && e.amount !== null);
   const actual = included.filter(e => e.basis === "actual" && e.category !== "revenue");
   const planned = included.filter(e => e.basis === "plan" && e.category !== "revenue");
@@ -270,8 +294,10 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
     isOperatingCost(e.category) && e.category !== "marketing"
     && (e.costBehavior === "variable" || (!e.costBehavior && e.category === "variable"))));
   const revenueRows = included.filter(e => e.category === "revenue" && e.basis === "actual");
-  // Revenue is owned by the commercial metrics form. Ledger revenue is a fallback for imported ledgers.
-  const revenue = metrics.revenue ?? (revenueRows.length ? amountOf(revenueRows) : null);
+  // Bank-confirmed net receipts (turnover − refunds − fees − stated taxes) are the revenue when statements cover
+  // the month; otherwise the commercial metrics form, then ledger revenue rows.
+  const revenueSource: RevenueSource = bank ? "bank" : metrics.revenue !== null ? "manual" : revenueRows.length ? "ledger" : null;
+  const revenue = bank ? bank.net : metrics.revenue ?? (revenueRows.length ? amountOf(revenueRows) : null);
   const profit = revenue === null ? null : sum([revenue, -operating]);
   const plan = planned.length ? amountOf(planned) : null;
 
@@ -364,11 +390,20 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
     romi: marketing && customers !== null && romiBase !== null ? (customers * romiBase - marketing) / marketing : null,
     romiBasis: ltv !== null ? "ltv" as const : "month" as const,
     confirmed: metrics.costsReviewed,
+    // Per sale, from the statements: one Kaspi payment is one sale.
+    sales: bank && bank.sales > 0 ? bank.sales : null,
+    avgCheck: bank?.avgCheck ?? null,
+    netPerSale: bank && bank.sales > 0 ? bank.net / bank.sales : null,
+    profitPerSale: bank && bank.sales > 0 && profit !== null ? profit / bank.sales : null,
+    breakEvenSales: bank && bank.sales > 0 && bank.net > 0 ? Math.ceil(operating / (bank.net / bank.sales)) : null,
   };
 
   return {
     cost, operating, capital, paid, unpaid, revenue, profit, tax, marketing, plan, variable,
     revenueRecorded: revenue !== null,
+    revenueSource,
+    manualRevenue: metrics.revenue,
+    bank,
     groups,
     kinds,
     obligations,
@@ -394,8 +429,8 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
   };
 }
 
-export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; metrics: FinanceMetrics }>) {
-  const summaries = projects.map(p => summarizeFinance(p.entries, p.metrics));
+export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; metrics: FinanceMetrics; bank?: BankFacts | null }>) {
+  const summaries = projects.map(p => summarizeFinance(p.entries, p.metrics, p.bank ?? null));
   const total = summarizeFinance(projects.flatMap(p => p.entries), EMPTY_FINANCE_METRICS);
   const revenueComplete = summaries.length > 0 && summaries.every(s => s.revenue !== null);
   const revenue = revenueComplete ? sum(summaries.map(s => s.revenue!)) : null;
@@ -405,8 +440,16 @@ export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; me
   const funnelComplete = spenders.length > 0 && spenders.every(s => s.funnel.leads !== null && s.funnel.customers !== null);
   const leads = funnelComplete ? sum(summaries.map(s => s.funnel.leads ?? 0)) : null;
   const customers = funnelComplete ? sum(summaries.map(s => s.funnel.customers ?? 0)) : null;
+  // Bank facts add up across projects; per-sale figures are not pooled.
+  const banks = summaries.map(s => s.bank).filter((b): b is BankFacts => !!b);
+  const bank: BankFacts | null = banks.length ? {
+    gross: sum(banks.map(b => b.gross)), refunds: sum(banks.map(b => b.refunds)), commission: sum(banks.map(b => b.commission)),
+    tax: banks.some(b => b.tax !== null) ? sum(banks.map(b => b.tax ?? 0)) : null, net: sum(banks.map(b => b.net)), sales: sum(banks.map(b => b.sales)), avgCheck: null,
+    credited: banks.some(b => b.credited !== null) ? sum(banks.map(b => b.credited ?? 0)) : null,
+  } : null;
   return {
     ...total,
+    bank,
     revenue,
     profit,
     revenueRecorded: revenueComplete,
@@ -437,6 +480,7 @@ export type FinanceTrendPoint = {
   groups: Record<CostGroup, number>;
   categories: Partial<Record<FinanceCategory, number>>;
   revenue: number | null;
+  revenueSource: RevenueSource;
   profit: number | null;
   paid: number;
   unpaid: number;
@@ -451,8 +495,8 @@ export type FinanceTrendPoint = {
   hasData: boolean;
 };
 
-export function trendPoint(period: string, entries: FinanceEntry[], metrics: FinanceMetrics): FinanceTrendPoint {
-  const s = summarizeFinance(entries, metrics);
+export function trendPoint(period: string, entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null): FinanceTrendPoint {
+  const s = summarizeFinance(entries, metrics, bank);
   return {
     period,
     cost: s.cost,
@@ -461,6 +505,7 @@ export function trendPoint(period: string, entries: FinanceEntry[], metrics: Fin
     groups: s.groups,
     categories: Object.fromEntries(s.categories.filter(c => c.amount !== null).map(c => [c.key, c.amount!])),
     revenue: s.revenue,
+    revenueSource: s.revenueSource,
     profit: s.profit,
     paid: s.paid,
     unpaid: s.unpaid,

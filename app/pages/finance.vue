@@ -20,6 +20,7 @@ watch(project, id => {
 }, { immediate: true });
 watch(() => route.query.project, id => { if (typeof id === "string" && id && id !== project.value) project.value = id; });
 const summary = computed(() => finance.summaries.value[project.value] ?? null);
+const bankMonth = computed(() => finance.data.value?.bank ?? null);
 const metrics = computed(() => finance.metricsOf(project.value));
 const trend = computed(() => finance.trendOf(project.value));
 const previous = computed(() => trend.value.length > 1 ? trend.value[trend.value.length - 2]! : null);
@@ -135,7 +136,7 @@ const BOM = String.fromCharCode(0xfeff);
       <section class="kpi-row" aria-label="Негізгі көрсеткіштер" :class="{ stale: !finance.fresh.value }">
         <KpiTile tone="brand" label="Айдың шығыны" :value="money(summary.cost)" :sub="`Жұмсалды ${compactMoney(summary.paid)}`" :delta="relativeChange(summary.cost, prevValue(p => p.cost))" />
         <KpiTile :tone="summary.obligations.unpaid > 0 ? 'danger' : 'success'" label="Төленуі керек" :value="money(summary.obligations.unpaid)" :sub="`Айлық ${compactMoney(summary.kinds.salary.unpaid)} · міндетті ${compactMoney(summary.kinds.mandatory.unpaid)}`" />
-        <KpiTile label="Табыс" :value="money(summary.revenue)" :sub="summary.revenue === null ? 'Юнит бетінде енгізіңіз' : summary.unit.arpu !== null ? `ARPU ${money(summary.unit.arpu)}` : 'Танылған табыс'" :delta="relativeChange(summary.revenue, prevValue(p => p.revenue))" good-when="up" />
+        <KpiTile label="Табыс" :value="money(summary.revenue)" :sub="summary.revenueSource === 'bank' ? `Выписка бойынша таза түсім · оборот ${compactMoney(summary.bank?.gross)}` : summary.revenue === null ? 'Выписка жүктеңіз немесе юнит бетінде енгізіңіз' : summary.unit.arpu !== null ? `Қолмен енгізілген · ARPU ${money(summary.unit.arpu)}` : 'Қолмен енгізілген'" :delta="relativeChange(summary.revenue, prevValue(p => p.revenue))" good-when="up" />
         <KpiTile label="Операциялық нәтиже" :tone="summary.profit === null ? 'default' : summary.profit < 0 ? 'danger' : 'success'" :value="money(summary.profit)" :sub="summary.margin === null ? 'Табыс − операциялық шығын' : `Маржа ${formatPercent(summary.margin)}`" :delta="relativeChange(summary.profit, prevValue(p => p.profit))" good-when="up" />
         <KpiTile label="Таргет" :value="money(summary.kinds.target.total)" :sub="summary.funnel.cpl !== null ? `CPL ${money(summary.funnel.cpl)} · CAC ${money(summary.funnel.cac)}` : 'Лид / клиент саны енгізілмеген'" :delta="relativeChange(summary.kinds.target.total, prevValue(p => p.kinds.target))" />
       </section>
@@ -192,6 +193,8 @@ const BOM = String.fromCharCode(0xfeff);
         </div>
         <p class="panel-footnote">Жоспар — жеке бюджет, фактке қосылмайды. Жабдық пен депозит ақша шығынына кіреді, бірақ операциялық нәтижеге кірмейді.</p>
       </section>
+
+      <BankReceiptsPanel id="receipts" :bank="bankMonth?.byProject[project] ?? null" :categories="summary.categories" :project-id="project" :period="period" :pending="bankMonth?.pending ?? null" :covered-to="bankMonth?.coveredTo ?? null" :statements-exist="!!bankMonth" />
 
       <div class="insight-grid">
         <section class="panel analytics-panel">

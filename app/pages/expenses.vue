@@ -115,7 +115,7 @@ async function addOneTime() {
         <small>{{ oneTime.length + ledgerOther.length }} жазба · бірден жұмсалды</small>
       </button>
       <NuxtLink :to="reportLink('target')" class="panel exp-card">
-        <header><span class="exp-icon target"><Megaphone :size="18" /></span>Таргет / жарнама</header>
+        <header><span class="exp-icon target"><Megaphone :size="18" /></span>Таргет (Facebook)</header>
         <strong>{{ formatMoney(targetTotal) }}</strong>
         <small>Жұмсалды · толығы есепте <ArrowUpRight :size="12" /></small>
       </NuxtLink>

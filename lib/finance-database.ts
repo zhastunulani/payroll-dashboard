@@ -1,3 +1,4 @@
+import { bankFactsWindow } from "./bank-database";
 import { getRawDb } from "./database";
 import { OTHER_EXPENSE_CATEGORY_NAME } from "./expenses";
 import { FINANCE_SCHEMA } from "./finance-schema";
@@ -5,6 +6,7 @@ import {
   classifyFinanceCost,
   EMPTY_FINANCE_METRICS,
   financePeriod,
+  importedCategory,
   normalizeFinanceEntry,
   normalizeFinanceMetrics,
   periodWindow,
@@ -12,6 +14,7 @@ import {
   type FinanceEntry,
   type FinanceMetrics,
   type FinanceProject,
+  type BankFacts,
   type FinanceTrendPoint,
 } from "./finance";
 
@@ -64,6 +67,10 @@ export type FinanceData = {
   periods: string[];
   trend: Record<string, FinanceTrendPoint[]>;
   payrollMonths: Record<string, string[]>;
+  /** Actual receipts from bank statements for the month (null when no statement was ever uploaded). */
+  bank?: import("./bank-database").BankMonth | null;
+  /** Bank facts per project and month across the window: the revenue source when present. */
+  bankFacts: Record<string, Record<string, BankFacts>>;
 };
 
 /**
@@ -103,7 +110,8 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
       .all<{ workspace_id: string; year: number; month: number }>(),
   ]);
 
-  const all: FinanceEntry[] = entries.results.map(mapFinanceEntry);
+  // Imported offline advertising is a one-time purchase; only Facebook / Instagram spend is «Таргет».
+  const all: FinanceEntry[] = entries.results.map(mapFinanceEntry).map(e => ({ ...e, category: importedCategory(e) }));
   const live = (values: Pick<FinanceEntry, "id" | "workspaceId" | "period" | "name" | "amount" | "category" | "status" | "origin"> & Partial<FinanceEntry>): FinanceEntry => ({
     basis: "actual", disposition: "included", source: "Payroll: ағымдағы есеп", note: "", relatedId: "", updatedAt: "", ...values,
   });
@@ -164,11 +172,13 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
   const payrollMonths: Record<string, string[]> = {};
   for (const m of monthRows.results) (payrollMonths[m.workspace_id] ??= []).push(periodKey(m.year, m.month));
 
+  // Bank statements are the revenue source where they cover a project-month; they must not break the ledger when unavailable.
+  const bankFacts = await bankFactsWindow(from, to).catch(() => ({} as Record<string, Record<string, BankFacts>>));
   const trend: Record<string, FinanceTrendPoint[]> = {};
   const current: Record<string, FinanceMetrics> = {};
   for (const project of projects.results) {
     const rows = all.filter(e => e.workspaceId === project.id);
-    trend[project.id] = window.map(p => trendPoint(p, rows.filter(e => e.period === p), metricMap.get(metricKey(project.id, p)) ?? EMPTY_FINANCE_METRICS));
+    trend[project.id] = window.map(p => trendPoint(p, rows.filter(e => e.period === p), metricMap.get(metricKey(project.id, p)) ?? EMPTY_FINANCE_METRICS, bankFacts[project.id]?.[p] ?? null));
     current[project.id] = metricMap.get(metricKey(project.id, period)) ?? { ...EMPTY_FINANCE_METRICS };
     payrollMonths[project.id] = (payrollMonths[project.id] ?? []).sort();
   }
@@ -183,6 +193,7 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
     periods: periods.results.map(p => p.period),
     trend,
     payrollMonths,
+    bankFacts,
   };
 }
 

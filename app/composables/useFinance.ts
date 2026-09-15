@@ -3,6 +3,7 @@ import {
   EMPTY_FINANCE_METRICS,
   financeIssues,
   summarizeFinance,
+  type BankFacts,
   type FinanceEntry,
   type FinanceIssue,
   type FinanceMetrics,
@@ -121,10 +122,12 @@ export function useFinance() {
   const fresh = computed(() => data.value?.period === period.value);
   const entriesOf = (projectId: string) => data.value?.entries.filter(e => e.workspaceId === projectId) ?? [];
   const metricsOf = (projectId: string): FinanceMetrics => data.value?.metrics[projectId] ?? EMPTY_FINANCE_METRICS;
+  /** The month's bank-statement facts for a project: when present they are its revenue. */
+  const bankFactsOf = (projectId: string): BankFacts | null => data.value?.bankFacts?.[projectId]?.[data.value.period] ?? null;
   const summaries = computed<Record<string, FinanceSummary>>(() => Object.fromEntries(
-    projects.value.map(p => [p.id, summarizeFinance(entriesOf(p.id), metricsOf(p.id))]),
+    projects.value.map(p => [p.id, summarizeFinance(entriesOf(p.id), metricsOf(p.id), bankFactsOf(p.id))]),
   ));
-  const total = computed(() => consolidateFinance(projects.value.map(p => ({ entries: entriesOf(p.id), metrics: metricsOf(p.id) }))));
+  const total = computed(() => consolidateFinance(projects.value.map(p => ({ entries: entriesOf(p.id), metrics: metricsOf(p.id), bank: bankFactsOf(p.id) }))));
   const closed = computed(() => period.value < currentPeriod());
   const issues = computed<Record<string, FinanceIssue[]>>(() => Object.fromEntries(projects.value.map(p => [
     p.id,
@@ -150,7 +153,7 @@ export function useFinance() {
 
   return {
     period, data, loading, error, fresh, projects, summaries, total, issues, closed,
-    load, entriesOf, entryDraft, openEntry, reportProject, metricsOf, trendOf, previousOf, colorOf, nameOf,
+    load, entriesOf, entryDraft, openEntry, reportProject, metricsOf, bankFactsOf, trendOf, previousOf, colorOf, nameOf,
     saveEntry: (entry: Partial<FinanceEntry>) => post({ action: "entry", entry }),
     deleteEntry: (entry: FinanceEntry) => post({ action: "deleteEntry", id: entry.id, updatedAt: entry.updatedAt }),
     saveMetrics: (workspaceId: string, metrics: FinanceMetrics) => post({ action: "metrics", workspaceId, period: period.value, metrics, version: data.value?.metricVersions[workspaceId] ?? null }),

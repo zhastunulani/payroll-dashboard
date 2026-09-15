@@ -5,7 +5,9 @@
  * Analytics links into Payroll open the exact project and month there.
  */
 export const PAYROLL_ROUTES = new Set(["/departments", "/expenses", "/other-expenses", "/smz", "/settings"]);
-export const ANALYTICS_ROUTES = new Set(["/", "/finance", "/unit-economics"]);
+export const ANALYTICS_ROUTES = new Set(["/", "/finance", "/unit-economics", "/bank"]);
+/** Report pages that read the finance ledger. */
+export const FINANCE_ROUTES = new Set(["/", "/finance", "/unit-economics"]);
 
 export function useAppContext() {
   const payroll = usePayroll();

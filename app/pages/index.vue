@@ -20,6 +20,7 @@ const totals = computed(() => ({
   target: sum(s => s.kinds.target.total), other: sum(s => s.kinds.other.total),
 }));
 
+const bankLink = (id: string) => `/bank?${new URLSearchParams({ tab: "reports", project: id, month: period.value })}`;
 const levelRank = { critical: 0, warning: 1, info: 2 } as const;
 const cards = computed(() => projects.value.map(p => {
   const s = summaries.value[p.id]!, prev = previousOf(p.id);
@@ -67,11 +68,12 @@ const table = computed<Row[]>(() => {
     { key: "salary-unpaid", label: "оның ішінде төленбеген", cells: cells(s => s.kinds.salary.unpaid, id => ctx.payrollLink("/departments", id, "#payment-queue")), total: totals.value.salaryUnpaid, style: "sub" },
     { key: "mandatory", label: "Міндетті төлемдер", cells: cells(s => s.kinds.mandatory.total, id => ctx.payrollLink("/expenses", id)), total: totals.value.mandatory, previous: previousTotal(p => p.kinds.mandatory), style: "subtotal" },
     { key: "mandatory-unpaid", label: "оның ішінде төленбеген", cells: cells(s => s.kinds.mandatory.unpaid, id => ctx.payrollLink("/expenses", id)), total: totals.value.mandatoryUnpaid, style: "sub" },
-    { key: "target", label: "Таргет / жарнама — жұмсалды", cells: cells(s => s.kinds.target.total, id => ctx.financeLink(id, { kind: "target" }, "#ledger")), total: totals.value.target, previous: previousTotal(p => p.kinds.target), style: "subtotal" },
+    { key: "target", label: "Таргет (Facebook) — жұмсалды", cells: cells(s => s.kinds.target.total, id => ctx.financeLink(id, { kind: "target" }, "#ledger")), total: totals.value.target, previous: previousTotal(p => p.kinds.target), style: "subtotal" },
     { key: "other", label: "Басқа шығындар — жұмсалды", cells: cells(s => s.kinds.other.total, id => ctx.financeLink(id, { kind: "other" }, "#ledger")), total: totals.value.other, previous: previousTotal(p => p.kinds.other), style: "subtotal" },
     { key: "cost", label: "Айдың шығыны, барлығы", cells: cells(s => s.cost, id => ctx.financeLink(id, {}, "#pnl")), total: total.value.cost, previous: previousTotal(p => p.cost), style: "result" },
     { section: "P&L — шығын түрлері бойынша" },
-    { key: "revenue", label: "Табыс", cells: cells(s => s.revenue, unitLink), total: total.value.revenue, style: "subtotal", goodWhen: "up" },
+    ...(Object.values(summaries.value).some(s => s.bank) ? [{ key: "gross", label: "Валовой оборот (выписка)", cells: ps.map(p => ({ value: summaries.value[p.id]!.bank?.gross ?? null, to: bankLink(p.id) })), total: total.value.bank?.gross ?? null, style: "muted" as const, goodWhen: "up" as const }] : []),
+    { key: "revenue", label: "Табыс (выписка бар болса — таза түсім)", cells: ps.map(p => ({ value: summaries.value[p.id]!.revenue, to: summaries.value[p.id]!.revenueSource === "bank" ? bankLink(p.id) : unitLink(p.id) })), total: total.value.revenue, style: "subtotal", goodWhen: "up" },
     ...operatingLines,
     { key: "operating", label: "Операциялық шығын", cells: cells(s => s.operating), total: total.value.operating, previous: previousTotal(p => p.operating), style: "subtotal" },
     { key: "profit", label: "Операциялық нәтиже", cells: cells(s => s.profit, id => ctx.financeLink(id, {}, "#pnl")), total: total.value.profit, style: "result", goodWhen: "up" },
@@ -142,13 +144,13 @@ const share = (paid: number, all: number) => all > 0 ? paid / all : null;
               <small v-else>енгізілмеген</small>
             </NuxtLink>
             <NuxtLink :to="ctx.financeLink(c.id, { kind: 'target' }, '#ledger')" class="project-row">
-              <span>Таргет</span><b>{{ money(c.s.kinds.target.total) }}</b><small>жұмсалды</small>
+              <span>Таргет (Facebook)</span><b>{{ money(c.s.kinds.target.total) }}</b><small>жұмсалды</small>
             </NuxtLink>
             <NuxtLink :to="ctx.financeLink(c.id, { kind: 'other' }, '#ledger')" class="project-row">
               <span>Басқа шығындар</span><b>{{ money(c.s.kinds.other.total) }}</b><small>{{ c.s.kinds.other.count }} жазба</small>
             </NuxtLink>
-            <NuxtLink v-if="c.s.profit !== null" :to="ctx.financeLink(c.id, {}, '#pnl')" class="project-row">
-              <span>Нәтиже</span><b :class="{ negative: c.s.profit < 0 }">{{ money(c.s.profit) }}</b><small>маржа {{ formatPercent(c.s.margin, 0) }}</small>
+            <NuxtLink v-if="c.s.profit !== null" :to="ctx.financeLink(c.id, {}, c.s.revenueSource === 'bank' ? '#receipts' : '#pnl')" class="project-row">
+              <span>Нәтиже</span><b :class="{ negative: c.s.profit < 0 }">{{ money(c.s.profit) }}</b><small :class="{ 'from-bank': c.s.revenueSource === 'bank' }">табыс {{ compactMoney(c.s.revenue) }} · {{ c.s.revenueSource === "bank" ? "выписка бойынша" : "қолмен" }} · маржа {{ formatPercent(c.s.margin, 0) }}</small>
             </NuxtLink>
             <NuxtLink v-else :to="`/unit-economics?month=${period}#metrics-${c.id}`" class="project-row missing">
               <span>Нәтиже</span><b>Табыс енгізу</b><small>табыс жоқ</small>

@@ -35,7 +35,7 @@ watch(() => [route.path, route.query.workspace, route.query.month] as const, ([p
 watch(() => [route.path, route.query.month] as const, ([path, month]) => {
   if (ANALYTICS_ROUTES.has(path) && typeof month === "string") ctx.selectPeriod(month);
 }, { immediate: true });
-watch(ctx.period, () => { if (ANALYTICS_ROUTES.has(route.path)) finance.load(); });
+watch(ctx.period, () => { if (FINANCE_ROUTES.has(route.path)) finance.load(); });
 </script>
 
 <template>

@@ -190,6 +190,8 @@ const chart = computed(() => {
         </section>
       </div>
 
+      <MetaTargetPanel />
+
       <section class="metrics-entry" aria-label="Айлық деректерді енгізу">
         <header><span class="eyebrow">Деректерді енгізу · {{ periodLabel(period) }}</span><h2>Әр жобаның айлық көрсеткіштері</h2><p>Бос өріс — «дерек жоқ». Нақты нөл болса, 0 деп жазыңыз. Таргет шығыны реестрге жеке жазба болып түседі.</p></header>
         <nav class="bank-chips unit-mobile-tabs unit-mobile-only" aria-label="Қай жобаның деректері">

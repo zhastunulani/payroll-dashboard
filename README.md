@@ -80,6 +80,17 @@ APP_PASSWORD_HASH=pbkdf2$...
 SESSION_SECRET=кемінде-32-таңбалы-құпия-жол
 ```
 
+Қосымша (міндетті емес) — таргет шығынын Meta-дан тарту үшін:
+
+```env
+META_ACCESS_TOKEN=...
+```
+
+Бұл **жүйелік пайдаланушы** (System user) токені болуы керек: Business Settings → Users → System users →
+жаңа пайдаланушы → жарнама аккаунтын беру → «Generate new token», рұқсаты **`ads_read`**. Ондай токеннің
+мерзімі бітпейді. Graph API Explorer беретін токен бір сағаттан кейін өледі және жарамайды. Токен жоқ болса,
+сайт қалыпты жұмыс істейді — «Юнит және таргет» бетіндегі Meta панелі қалай қосу керегін жазып тұрады.
+
 3. Dependency және dev server:
 
 ```bash
@@ -147,6 +158,7 @@ Render environment variables:
 - `DATABASE_URL`
 - `APP_PASSWORD_HASH`
 - `SESSION_SECRET`
+- `META_ACCESS_TOKEN` (міндетті емес — таргет шығыны үшін)
 
 Free Render instance inactive кезде ұйықтауы мүмкін. Бұл Nuxt кодының қатесі емес; нақты always-on үшін Cloudflare Workers deployment қолданылады.
 
@@ -164,6 +176,7 @@ Free Render instance inactive кезде ұйықтауы мүмкін. Бұл N
 npx wrangler secret put DATABASE_URL
 npx wrangler secret put APP_PASSWORD_HASH
 npx wrangler secret put SESSION_SECRET
+npx wrangler secret put META_ACCESS_TOKEN
 ```
 
 Preview және deploy:
@@ -174,6 +187,21 @@ npm run deploy:worker
 ```
 
 Осы migration кезеңінде production deploy автоматты жасалмайды. Local тексеруден кейін ғана commit/push/deploy орындалуы керек.
+
+## VPS (payroll.zhastunulani.kz)
+
+GitLab CI `main`-ге пуш болғанда `.output` архивін серверге жөнелтіп, `payroll-dashboard.service`-ті
+қайта қосады (`scripts/deploy-vps.sh`). Құпиялар архивпен бірге **жөнелтілмейді** — олар серверде
+systemd unit оқитын env файлында тұрады. Сондықтан `META_ACCESS_TOKEN`-ді бір рет серверде қосып,
+сервисті қайта қосу керек:
+
+```bash
+sudo systemctl show payroll-dashboard.service -p EnvironmentFile   # env файлы қайда
+sudo nano <сол файл>                                              # META_ACCESS_TOKEN=... қосу
+sudo systemctl restart payroll-dashboard.service
+```
+
+Токен қосылмаса, сайт қалыпты жұмыс істейді: Meta панелі тек «токен қосылмаған» деп тұрады.
 
 ## Дизайн қағидалары
 

@@ -72,3 +72,38 @@ Uploads: **Kaspi Pay** «Детальная информация по опера
 - **Revenue from the bank.** Where a project-month has assigned operations, its revenue («Табыс») is the statement's net receipts (turnover − refunds − fees − stated taxes); the manual figure is used only for months without statements (`revenueSource`: bank / manual / ledger). ARPU, profit, margin, per-student profit, trends and the overview all follow. Unit economics adds gross turnover, refund and fee shares, number of sales, average check, profit per sale and the sales needed to cover costs.
 - **Integration:** `/api/finance` returns `bank` for the month and `bankFacts` per project and month across the trend window. The project report has «Нақты түсімдер және сверка» (`#receipts`): net receipts − advertising − payroll − rent − teaching costs (contractors, variable) − operating costs = cash operating profit; equipment and deposits apart. Unit economics and the overview show gross turnover, net receipts and cash profit per project, linked to the bank report.
 - **Storage:** `bank_statements` (file, hash, checks), `bank_operations`, `bank_rules`, `bank_history`, `bank_crm_totals` (`lib/bank-schema.ts`).
+
+## Meta advertising (target spend)
+The «Юнит және таргет» screen carries a **Meta · Facebook / Instagram** panel with what the ad cabinet
+actually charged, so target spend no longer depends on a figure typed from a monthly Excel report.
+
+- **Reading it.** `lib/meta-api.ts` is the Graph client (`v21.0`, paging, back-off on Meta's throttling
+  codes); `lib/meta.ts` holds the pure logic; `lib/meta-database.ts` syncs and serves. The token comes
+  from `META_ACCESS_TOKEN` and is never stored in the database or sent to the browser — the page only
+  learns whether it is valid and when it expires (checked at most once every five minutes, so opening a
+  page never waits on Facebook).
+- **The token must be a system-user token.** A token copied out of the Graph API Explorer dies within the
+  hour. In Business Settings → Users → System users, create a user, give it the ad account, then
+  «Generate new token» with **`ads_read`** (add `read_insights` for page/post metrics). Such a token has
+  no expiry date. Without `ads_read` the panel says so instead of showing zeros.
+- **Spend is in the cabinet's currency (USD here), the dashboard is in ₸.** No rate is ever invented: the
+  owner enters ₸/$ for the month, or it is read from the ledger's own USD target entry for that month
+  (`meta_fx_rates`, then `finance_entries.fx_rate`). With no rate the ₸ figure stays empty rather than zero.
+- **Reach is people, not a sum.** Meta counts a person once per period it aggregates, so a month's reach is
+  far below the sum of its days — in practice about 2.5× lower. A window that is exactly one month of one
+  account shows the real count; any other window shows «көрсетілім-күн» and says why. Spend, impressions
+  and clicks do add up, and reconcile to Meta's monthly figures to the cent.
+- **One cabinet, four projects.** Only accounts pointed at a project feed a project P&L
+  (`metaFactsWindow`); an account that spends but is unassigned is named in a warning and reaches nobody's
+  report. The regional split (`meta_region_daily`) is the evidence for dividing one pooled account:
+  Meta apportions the day's spend with six decimals, so those rows keep six decimals and are rounded only
+  after summing — rounding each region first loses a cent off the day.
+- **Re-syncing is safe.** Every row is keyed by account + day (+ region), so a repeated sync overwrites
+  instead of adding: finished months never move, and no duplicates are possible. Runs are logged in
+  `meta_sync_runs`; one failing account never loses the others.
+- **The panel also reconciles.** It prints what the ledger holds for the month next to the cabinet's own
+  figure and the difference, because a hand-entered target row often covers only part of the month.
+- **Storage:** `meta_accounts` (name, currency, project, tracked), `meta_daily`, `meta_period` (Meta's own
+  monthly aggregate — the only source of a deduplicated reach), `meta_region_daily`, `meta_fx_rates`,
+  `meta_sync_runs` (`lib/meta-schema.ts`). API: `GET /api/meta?period=&months=`, `POST /api/meta`
+  (`sync`, `account`, `rate`).

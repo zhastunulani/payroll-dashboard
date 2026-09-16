@@ -272,3 +272,42 @@ g.dim .chart-cap { opacity: .4; }
   .funnel > div:nth-child(3) { margin-inline: 16px; }
   .form-grid.two.entry-form { grid-template-columns: 1fr; }
 }
+
+/* Meta advertising panel: status, actuals against the ledger, and the account mapping. */
+.meta-panel { display: grid; gap: 14px; }
+.meta-panel > header { align-items: flex-start; }
+.meta-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.meta-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--canvas); }
+.meta-pill.good { color: var(--success); background: var(--success-soft); }
+.meta-pill.warn { color: var(--warning); background: var(--warning-soft); }
+.meta-pill.bad, .meta-pill.off { color: var(--danger); background: var(--danger-soft); }
+.meta-setup { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-2); background: var(--canvas); font-size: 12px; line-height: 1.6; }
+.meta-setup.warn { border-color: #fdd9a8; color: var(--warning); background: var(--warning-soft); }
+.meta-setup code { padding: 1px 5px; border-radius: 5px; background: #fff; font-size: 11px; }
+.meta-message { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--success); font-size: 12px; font-weight: 600; }
+.meta-message.bad { color: var(--danger); }
+.meta-message svg, .meta-setup svg { flex: none; margin-top: 2px; }
+.meta-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.meta-note .diff-up { color: var(--warning); }
+.meta-note .diff-down { color: var(--success); }
+.meta-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.meta-subhead { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--ink-2); }
+.meta-settings { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 12px; }
+.meta-settings > summary { color: var(--brand); font-size: 12px; font-weight: 700; cursor: pointer; }
+.meta-settings[open] > summary { margin-bottom: 2px; }
+.meta-rate { max-width: 280px; }
+.meta-settings select { width: 100%; min-width: 150px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 12px; background: #fff; }
+.meta-panel .spin { animation: meta-spin 1s linear infinite; }
+@keyframes meta-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1100px) { .meta-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) {
+  .meta-kpis { grid-template-columns: 1fr; }
+  .meta-panel > header { flex-direction: column; gap: 10px; }
+  .meta-rate { max-width: none; }
+}
+
+/* The warning line is an icon next to text, so it needs to be a row rather than a block. */
+.meta-setup.warn { display: flex; align-items: flex-start; gap: 7px; }
+/* A month of daily bars is too many for a phone to label each one: the tooltip and the «Кесте» view
+   still give exact numbers, so the per-bar captions step aside instead of overlapping. */
+@media (max-width: 760px) { .meta-panel .chart-cap { display: none; } }

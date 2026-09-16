@@ -169,6 +169,8 @@ export async function processBankStatement(input: { bank: BankCode; fileName: st
   statements.push(db.prepare("INSERT INTO bank_history(id,statement_id,action,after_data,note) VALUES(?,?,?,?,?)")
     .bind(crypto.randomUUID(), statementId, "import", JSON.stringify({ fileName: input.fileName, bank: input.bank, operations: fresh.length, duplicates: result.duplicates, checksOk }), checksOk ? "" : "Итогтар сәйкес келмеді, бәрібір импортталды"));
   await db.batch(statements);
+  // Keep the POS detail and the account-statement batches from counting the same money twice.
+  await reconcilePosSettlements().catch(() => null);
   return { ...result, committed: true, statementId };
 }
 
@@ -340,6 +342,31 @@ export async function assignBankGroup(ids: string[], projectId: string | null, r
   return changed;
 }
 
+/**
+ * The account statement prints one «Расчеты по карточкам» batch per day, while the POS statement lists the sales
+ * inside it. Where both exist for the same contract and credit date, the batch is marked a duplicate so the money
+ * is counted once; if the POS statement is later deleted, the batch comes back through the rules.
+ */
+export async function reconcilePosSettlements() {
+  await ensureBankDatabase();
+  const db = getRawDb();
+  const contract = "substring(channel from 'договор ([^ ·]+)')";
+  const covered = `EXISTS (SELECT 1 FROM bank_operations p WHERE p.bank='halyk' AND p.kind IN ('sale','refund','commission')
+    AND p.credited_date = o.credited_date AND ${contract.replace(/channel/g, "p.channel")} IS NOT DISTINCT FROM ${contract.replace(/channel/g, "o.channel")})`;
+  const marked = await db.prepare(`WITH previous AS (SELECT id, assignment, project_id FROM bank_operations o
+      WHERE o.bank='halyk' AND o.kind='settlement' AND o.assignment NOT IN ('duplicate','manual') AND o.credited_date IS NOT NULL AND ${covered} FOR UPDATE),
+    changed AS (UPDATE bank_operations o SET assignment='duplicate', recon_status='duplicate', updated_at=?
+      FROM previous WHERE o.id = previous.id RETURNING o.id)
+    INSERT INTO bank_history(id, operation_id, action, before_data, after_data, note)
+    SELECT gen_random_uuid()::text, previous.id, 'pos', json_build_object('assignment', previous.assignment)::text,
+      json_build_object('assignment', 'duplicate')::text, 'POS выпискасында жеке сатылымдары бар: қайталанбау үшін есептен шығарылды'
+    FROM previous JOIN changed ON changed.id = previous.id`).bind(new Date().toISOString()).run();
+  const restored = await db.prepare(`SELECT id FROM bank_operations o WHERE o.bank='halyk' AND o.kind='settlement' AND o.assignment='duplicate' AND NOT ${covered}`)
+    .all<{ id: string }>();
+  if (restored.results.length) await applyBankRules(restored.results.map(r => r.id), "POS выпискасы жоқ: қайта есепке алынды");
+  return { marked: marked.meta.changes, restored: restored.results.length };
+}
+
 export async function commentBankOperation(id: string, comment: string) {
   await ensureBankDatabase();
   const text = comment.trim().slice(0, 1000);
@@ -386,6 +413,7 @@ export async function deleteBankStatement(id: string) {
     db.prepare("DELETE FROM bank_operations WHERE statement_id=?").bind(id),
     db.prepare("DELETE FROM bank_statements WHERE id=?").bind(id),
   ]);
+  await reconcilePosSettlements().catch(() => null);
 }
 
 export async function saveCrmTotals(workspaceId: string, period: string, source: string, deals: unknown, amount: unknown) {

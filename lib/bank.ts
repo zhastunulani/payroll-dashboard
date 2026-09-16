@@ -182,7 +182,8 @@ function ruleText(op: Pick<BankOperation, "address" | "legalEntity" | "legalEnti
     case "city": return detectCity(op.address) ?? "";
     case "address": return op.address;
     case "legalEntity": return `${op.legalEntity} ${op.legalEntityBin}`;
-    case "purpose": return op.purpose;
+    // POS rows carry the acquiring contract in the channel, so a rule on the purpose finds it too.
+    case "purpose": return `${op.purpose} ${op.channel}`;
     case "account": return op.account;
     case "counterparty": return op.counterparty;
     case "comment": return op.comment;
@@ -294,7 +295,7 @@ export interface BankSummary {
   tax: number | null;
   afterCommission: number;
   afterTax: number;
-  /** Confirmed credits on an account statement; null when no account statement covers the scope. */
+  /** Money confirmed as credited: account-statement batches, or POS rows with a credit date. */
   credited: number | null;
   /** Expected from Kaspi sales (sales − refunds − fees), not yet confirmed by an account statement. Cash is not included. */
   pending: number;
@@ -326,6 +327,12 @@ export function summarizeBank(ops: BankOperation[]): BankSummary {
     - kaspi.filter(o => o.kind === "refund").reduce((a, o) => a + Math.abs(o.amount), 0)
     - kaspi.reduce((a, o) => a + (o.commission || 0), 0));
 
+  // Credited money: a settlement batch as printed, or a POS row net of its bank fee.
+  const creditedOps = ops.filter(o => o.kind === "settlement" || (o.creditedDate && (o.kind === "sale" || o.kind === "refund" || o.kind === "commission")));
+  const credited = creditedOps.length
+    ? round2(creditedOps.reduce((a, o) => a + (o.kind === "settlement" ? o.amount : o.amount - (o.kind === "sale" ? o.commission : 0)), 0))
+    : null;
+
   const methods = new Map<string, { count: number; turnover: number; commission: number }>();
   for (const o of [...sales, ...settlementOps]) {
     const m = methods.get(o.paymentMethod) ?? { count: 0, turnover: 0, commission: 0 };
@@ -347,6 +354,8 @@ export function summarizeBank(ops: BankOperation[]): BankSummary {
       const key = o.legalEntity || o.legalEntityBin || "Белгісіз";
       const e = map.get(key) ?? { volume: 0, commission: 0, count: 0, refunds: 0 };
       if (o.kind === "sale" || o.kind === "settlement") { e.volume += o.amount; e.commission += o.commission || 0; }
+      // A separate fee row (e.g. what the merchant pays for a Halyk installment) is part of the rate.
+      if (o.kind === "commission") e.commission += o.commission || 0;
       if (o.kind === "refund") { e.count += 1; e.refunds += Math.abs(o.amount); }
       map.set(key, e);
     }
@@ -364,13 +373,13 @@ export function summarizeBank(ops: BankOperation[]): BankSummary {
     refunds, refundCount: refundsOps.length, commission,
     vatInFees: round2(ops.reduce((a, o) => a + (o.vat ?? 0), 0)),
     tax, afterCommission, afterTax: round2(afterCommission - (tax ?? 0)),
-    credited: settlementOps.length ? settlements : null,
+    credited: credited,
     pending: Math.max(0, pending),
     cash: round2(sales.filter(o => o.paymentMethod === CASH_METHOD).reduce((a, o) => a + o.amount, 0)),
     refundShare: share(refunds, turnover), commissionShare: share(commission, turnover),
     byMethod,
     byEntity: entityRows(() => true),
-    installmentByEntity: entityRows(o => isInstallment(o.paymentMethod) && (o.kind === "sale" || o.kind === "refund")),
+    installmentByEntity: entityRows(o => isInstallment(o.paymentMethod) && (o.kind === "sale" || o.kind === "refund" || o.kind === "commission")),
   };
 }
 

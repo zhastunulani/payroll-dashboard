@@ -228,3 +228,70 @@ test("a cash sale missing from the header totals is flagged", () => {
   assert.equal(s.checks.find(c => c.label === "Продажи наличными")?.ok, false);
   assert.equal(s.checks.find(c => c.label === "Продажи с Kaspi.kz")?.ok, true);
 });
+
+test("Halyk POS statement: a sale, its bank fee and the merchant installment fee", async () => {
+  const { posOperation, isPosStatement } = await import("../lib/bank-pos.ts");
+  assert.equal(isPosStatement("ВЫПИСКА по POS-договору в АО Народный Банк"), true);
+  assert.equal(isPosStatement("ВЫПИСКА ПО СЧЕТУ"), false);
+
+  const qr = posOperation({
+    "Дата зачисления": "01.08.2026", "Дата и время транзакции": "31.07.2026 16:21:33",
+    "Юридическое наименование": "ТОО UNIT LLC", "Торговое наименование": "Eduser online",
+    "Aдрес торговой точки": "l. Астана Қ., ТҰРан, 34В, 501", "№ терминала": "61613987",
+    "Номер контракта": "754834-27/09/25", "Тип операции": "Оплата", "Сумма операции": "54083.0",
+    "Сумма к зачислению": "53812.58", "Комиссия банка": "-270.42", "Код авторизации": "402765",
+    "RRN/SRN операции": "OBLQR26073116211 19125", "№ карты": "KZ0260...5184",
+    "Платежная система": "HalykQR", "Способ оплаты": "QR",
+  }, "240240004682")!;
+  assert.equal(qr.kind, "sale");
+  assert.deepEqual([qr.date, qr.time, qr.creditedDate], ["2026-07-31", "16:21:33", "2026-08-01"]);
+  assert.deepEqual([qr.amount, qr.commission], [54083, 270.42]);
+  assert.equal(qr.paymentMethod, "Halyk QR");
+  assert.match(qr.channel, /договор 754834-27\/09\/25/);
+  assert.match(qr.channel, /терминал 61613987/);
+
+  // What the merchant pays the bank for offering an installment: a cost, not a customer refund.
+  const installmentFee = posOperation({
+    "Дата зачисления": "07.04.2026", "Дата и время транзакции": "06.04.2026 21:11:04",
+    "Тип операции": "Оплата", "Сумма операции": "-8450.0", "Сумма к зачислению": "-8450.0", "Комиссия банка": "0.0",
+    "RRN/SRN операции": "CPA000019370010FE E", "№ карты": "HB_InstFee", "Платежная система": "HBI", "Способ оплаты": "CHIP",
+    "Юридическое наименование": "ТОО UNIT LLC",
+  }, "240240004682")!;
+  assert.equal(installmentFee.kind, "commission");
+  assert.deepEqual([installmentFee.amount, installmentFee.commission], [-8450, 8450]);
+  assert.equal(installmentFee.paymentMethod, "Рассрочка (Halyk)");
+
+  // The bonus-payment fee is printed in the fee column instead.
+  const bonusFee = posOperation({
+    "Дата зачисления": "13.06.2026", "Дата и время транзакции": "12.06.2026 15:35:37",
+    "Тип операции": "Комиссия за оплату бонусами", "Сумма операции": "0.0", "Комиссия банка": "-1.22",
+    "№ карты": "Rdmp", "Платежная система": "DRdm", "Способ оплаты": "CHIP",
+  }, "240240004682")!;
+  assert.equal(bonusFee.kind, "commission");
+  assert.deepEqual([bonusFee.amount, bonusFee.commission], [-1.22, 1.22]);
+
+  // The same money must not be counted twice: the sale is turnover, the fees are costs.
+  const ops = [qr, installmentFee, bonusFee, posOperation({
+    "Дата зачисления": "07.04.2026", "Дата и время транзакции": "06.04.2026 21:11:03",
+    "Тип операции": "Оплата", "Сумма операции": "65000.0", "Сумма к зачислению": "65000.0", "Комиссия банка": "0.0",
+    "RRN/SRN операции": "CPA000019370010", "№ карты": "HB_Inst", "Платежная система": "HBI", "Способ оплаты": "CHIP",
+    "Юридическое наименование": "ТОО UNIT LLC",
+  }, "240240004682")!].map((o, i) => op({ ...o, id: String(i) }));
+  const s = summarizeBank(ops);
+  assert.equal(s.turnover, 54083 + 65000);
+  assert.equal(s.commission, 270.42 + 8450 + 1.22);
+  assert.equal(s.afterCommission, 119083 - 8721.64);
+  // Credited: the QR sale net of its fee, both fee rows, and the installment credited in full.
+  assert.equal(s.credited, 53812.58 - 8450 - 1.22 + 65000);
+  const installment = s.installmentByEntity.find(e => e.entity === "ТОО UNIT LLC")!;
+  assert.deepEqual([installment.volume, installment.commission, installment.rate], [65000, 8450, 8450 / 65000]);
+});
+
+test("two operations of the same installment keep their own identity", async () => {
+  const { posOperation } = await import("../lib/bank-pos.ts");
+  const row = { "Дата зачисления": "07.04.2026", "Тип операции": "Оплата", "RRN/SRN операции": "CPA1", "№ карты": "HB_Inst", "Сумма операции": "65000.0", "Комиссия банка": "0.0" };
+  const first = posOperation({ ...row, "Дата и время транзакции": "06.04.2026 21:11:03" }, "1")!;
+  const second = posOperation({ ...row, "Дата и время транзакции": "06.04.2026 21:11:09" }, "1")!;
+  assert.notEqual(dedupeKey(first), dedupeKey(second));
+  assert.equal(dedupeKey(first), dedupeKey(posOperation({ ...row, "Дата и время транзакции": "06.04.2026 21:11:03" }, "1")!));
+});

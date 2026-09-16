@@ -1,5 +1,5 @@
 import { isRequestAuthenticated } from "../../lib/auth";
-import { saveMetaAccount, saveMetaRate, syncMeta } from "../../lib/meta-database";
+import { backfillFxRates, saveMetaAccount, saveMetaRate, saveRegionRule, syncMeta } from "../../lib/meta-database";
 import { webRequest } from "../utils/legacy-response";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,8 +20,16 @@ export default defineEventHandler(async event => {
         return await syncMeta({ from, to, regions: body.regions === true, accountIds: Array.isArray(body.accountIds) ? body.accountIds.map(String) : undefined });
       }
       case "account":
-        await saveMetaAccount(String(body.id), body.projectId ? String(body.projectId) : null, body.tracked !== false, String(body.note ?? ""));
+        await saveMetaAccount(
+          String(body.id), body.projectId ? String(body.projectId) : null, body.tracked !== false,
+          String(body.note ?? ""), body.splitMode === "region" ? "region" : body.projectId ? "project" : "none",
+        );
         return { ok: true };
+      case "region":
+        await saveRegionRule(String(body.region), body.projectId ? String(body.projectId) : null, body.reset === true);
+        return { ok: true };
+      // Rates come from the National Bank, so they can be filled in without the Meta token.
+      case "rates": return { ok: true, ...await backfillFxRates() };
       case "rate": {
         const rate = body.rate === null || body.rate === "" ? null : Number(body.rate);
         if (rate !== null && !(rate > 0)) throw new Error("Бағам нөлден үлкен болуы керек.");

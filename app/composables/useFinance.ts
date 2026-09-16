@@ -11,6 +11,7 @@ import {
   type FinanceTrendPoint,
 } from "../../lib/finance";
 import type { FinanceData } from "../../lib/finance-database";
+import type { MetaFacts } from "../../lib/meta";
 
 /**
  * One identity color per project, in project sort order (EdUser, TamshyLab, Тараз, Қызылорда).
@@ -124,6 +125,20 @@ export function useFinance() {
   const metricsOf = (projectId: string): FinanceMetrics => data.value?.metrics[projectId] ?? EMPTY_FINANCE_METRICS;
   /** The month's bank-statement facts for a project: when present they are its revenue. */
   const bankFactsOf = (projectId: string): BankFacts | null => data.value?.bankFacts?.[projectId]?.[data.value.period] ?? null;
+  /**
+   * The Meta ad facts for a project-month: when present they are its target spend, already converted
+   * to ₸ day by day and divided between projects on the server.
+   */
+  const metaFactsOf = (projectId: string, forPeriod?: string): MetaFacts | null =>
+    data.value?.metaFacts?.[projectId]?.[forPeriod ?? data.value.period] ?? null;
+  /** Target spend in ₸ per project across the trend window, for the month-by-month view. */
+  const metaHistory = computed(() => {
+    const months = data.value?.window ?? [];
+    return projects.value.map(p => ({
+      project: p,
+      months: months.map(m => ({ period: m, facts: metaFactsOf(p.id, m) })),
+    }));
+  });
   const summaries = computed<Record<string, FinanceSummary>>(() => Object.fromEntries(
     projects.value.map(p => [p.id, summarizeFinance(entriesOf(p.id), metricsOf(p.id), bankFactsOf(p.id))]),
   ));
@@ -153,7 +168,7 @@ export function useFinance() {
 
   return {
     period, data, loading, error, fresh, projects, summaries, total, issues, closed,
-    load, entriesOf, entryDraft, openEntry, reportProject, metricsOf, bankFactsOf, trendOf, previousOf, colorOf, nameOf,
+    load, entriesOf, entryDraft, openEntry, reportProject, metricsOf, bankFactsOf, metaFactsOf, metaHistory, trendOf, previousOf, colorOf, nameOf,
     saveEntry: (entry: Partial<FinanceEntry>) => post({ action: "entry", entry }),
     deleteEntry: (entry: FinanceEntry) => post({ action: "deleteEntry", id: entry.id, updatedAt: entry.updatedAt }),
     saveMetrics: (workspaceId: string, metrics: FinanceMetrics) => post({ action: "metrics", workspaceId, period: period.value, metrics, version: data.value?.metricVersions[workspaceId] ?? null }),

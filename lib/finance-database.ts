@@ -2,11 +2,14 @@ import { bankFactsWindow } from "./bank-database";
 import { getRawDb } from "./database";
 import { OTHER_EXPENSE_CATEGORY_NAME } from "./expenses";
 import { FINANCE_SCHEMA } from "./finance-schema";
+import { metaFactsByPeriod } from "./meta-database";
+import { metaMonthRange, type MetaFacts } from "./meta";
 import {
   classifyFinanceCost,
   EMPTY_FINANCE_METRICS,
   financePeriod,
   importedCategory,
+  isFacebookTarget,
   normalizeFinanceEntry,
   normalizeFinanceMetrics,
   periodWindow,
@@ -71,6 +74,8 @@ export type FinanceData = {
   bank?: import("./bank-database").BankMonth | null;
   /** Bank facts per project and month across the window: the revenue source when present. */
   bankFacts: Record<string, Record<string, BankFacts>>;
+  /** Meta ad facts per project and month: the target-spend source when present. */
+  metaFacts: Record<string, Record<string, MetaFacts>>;
 };
 
 /**
@@ -174,6 +179,36 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
 
   // Bank statements are the revenue source where they cover a project-month; they must not break the ledger when unavailable.
   const bankFacts = await bankFactsWindow(from, to).catch(() => ({} as Record<string, Record<string, BankFacts>>));
+
+  /**
+   * The Meta ad cabinet is the target-spend source where it covers a project-month: the real ₸ amount
+   * replaces the figure typed from the monthly report, exactly as bank receipts replace manual revenue.
+   * The typed «Таргет» rows for that project-month become duplicates so the money is never counted twice.
+   */
+  // `from` and `to` are YYYY-MM periods here; the Meta tables are keyed by day, so the whole first and
+  // last month must be covered — comparing a day against "2026-09" would drop every day of September.
+  const metaFacts = await metaFactsByPeriod(metaMonthRange(from).from, metaMonthRange(to).to, window)
+    .catch(() => ({} as Record<string, Record<string, MetaFacts>>));
+  for (const [workspaceId, byPeriod] of Object.entries(metaFacts)) {
+    for (const [p, facts] of Object.entries(byPeriod)) {
+      if (facts.spendKzt === null || facts.spendKzt <= 0) continue;
+      const replaced = all.filter(e => e.workspaceId === workspaceId && e.period === p
+        && e.category === "marketing" && e.origin !== "meta" && isFacebookTarget(`${e.name} ${e.note}`));
+      for (const e of replaced) {
+        e.disposition = "duplicate";
+        e.note = `${e.note ? `${e.note} · ` : ""}Meta кабинетінің нақты сомасымен ауыстырылды; қосылмайды.`;
+      }
+      all.push({
+        id: `meta:${workspaceId}:${p}`, workspaceId, period: p, name: "Таргет · Meta кабинеті",
+        amount: facts.spendKzt, category: "marketing", basis: "actual", status: "paid", disposition: "included",
+        origin: "meta", source: `Meta кабинеті${facts.accounts.length ? ` · ${facts.accounts.length} кабинет` : ""}`,
+        note: `${facts.spend.toFixed(2)} USD · ҚР Ұлттық Банкінің күндік бағамымен${facts.fxRate ? ` (орташа ${facts.fxRate} ₸/$)` : ""}. ${facts.days} күн: ${facts.firstDate} → ${facts.lastDate}.`,
+        relatedId: "", updatedAt: "", currency: "USD", currencyAmount: facts.spend, fxRate: facts.fxRate,
+        costBehavior: "variable",
+      });
+    }
+  }
+
   const trend: Record<string, FinanceTrendPoint[]> = {};
   const current: Record<string, FinanceMetrics> = {};
   for (const project of projects.results) {
@@ -194,6 +229,7 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
     trend,
     payrollMonths,
     bankFacts,
+    metaFacts,
   };
 }
 

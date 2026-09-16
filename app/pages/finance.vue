@@ -93,7 +93,7 @@ const pages = computed(() => Math.max(1, Math.ceil(rows.value.length / 25)));
 const shownRows = computed(() => rows.value.slice((page.value - 1) * 25, page.value * 25));
 watch([project, view, category, search, period, kindFilter, onlyOwed], () => { page.value = 1; });
 const kindCount = (kind: "all" | FinanceKind) => viewEntries.value.filter(e => e.disposition === "included" && e.basis === "actual" && (kind === "all" || entryKind(e) === kind)).length;
-const originLabels = { salary: "Айлық", expense: "Payroll", legacy: "Ескі юнит-экономика", import: "Excel импорт", manual: "Қолмен" };
+const originLabels = { salary: "Айлық", expense: "Payroll", legacy: "Ескі юнит-экономика", import: "Excel импорт", manual: "Қолмен", meta: "Meta кабинеті" };
 const statusLabel = (e: FinanceEntry) => isOutstanding(e) ? "Төленбеген" : entryKind(e) === "salary" || entryKind(e) === "mandatory" ? "Төленді" : "Жұмсалды";
 const editable = (e: FinanceEntry) => e.origin === "import" || e.origin === "manual";
 function livePath(r: FinanceEntry) {

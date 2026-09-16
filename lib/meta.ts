@@ -2,9 +2,12 @@
  * Meta (Facebook / Instagram) advertising facts.
  *
  * Meta reports spending in the ad account's own currency — here USD — while the dashboard keeps money in ₸.
- * The conversion rate is never guessed: it comes from a rate the owner entered for that month, or the
- * ledger's own rate for the same month. Without a rate the ₸ figure stays null and only USD is shown.
+ * The rate is never guessed: each day converts at the National Bank's official rate for that day, and a
+ * rate the owner enters for a month overrides it. A day without a rate leaves the ₸ figure empty rather
+ * than short, because a partial total looks like a real one.
  */
+
+import { convertDaily } from "./fx.ts";
 
 export const META_API_VERSION = "v21.0";
 
@@ -17,6 +20,8 @@ export interface MetaAccount {
   status: number;
   projectId: string | null;
   tracked: boolean;
+  /** "project": all of it belongs to `projectId`. "region": divided by where Meta delivered it. */
+  splitMode: MetaSplitMode;
   spendLifetime: number | null;
   firstDate: string | null;
   lastDate: string | null;
@@ -70,7 +75,10 @@ export interface MetaSyncRun {
 export interface MetaFacts {
   spend: number;
   spendKzt: number | null;
+  /** The rate the window worked out at, weighted by each day's spend. */
   fxRate: number | null;
+  /** Days with spend but no published rate: why `spendKzt` is empty. */
+  missingRateDays: string[];
   impressions: number;
   /** People reached, counted once — only when the window matches a period Meta itself aggregated. */
   reach: number | null;
@@ -177,7 +185,7 @@ export function toMetaRegionDay(accountId: string, row: MetaInsightRow): MetaReg
  * Adds up daily rows for a window. `reach` stays null unless a matching period aggregate is supplied,
  * because reach counts people, and the same person reached on two days is one person, not two.
  */
-export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = []): MetaFacts | null {
+export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = [], rateOf?: (day: string) => number | null): MetaFacts | null {
   if (!days.length) return null;
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
   const add = (pick: (d: MetaDay) => number) => sorted.reduce((a, d) => a + pick(d), 0);
@@ -203,10 +211,13 @@ export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = []): MetaFact
   // account is the one case where Meta's own number is exact.
   const reach = covered && matching.length === 1 ? matching[0]!.reach : null;
 
+  // Each day converts at its own official rate; a single missing day leaves ₸ empty rather than short.
+  const converted = rateOf ? convertDaily(sorted.map(d => ({ date: d.date, amount: d.spend })), rateOf) : null;
   return {
     spend,
-    spendKzt: null,
-    fxRate: null,
+    spendKzt: converted && !converted.missing.length ? converted.total : null,
+    fxRate: converted && !converted.missing.length ? converted.rate : null,
+    missingRateDays: converted?.missing ?? [],
     impressions,
     reach,
     reachDays: add(d => d.reach),
@@ -225,11 +236,14 @@ export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = []): MetaFact
   };
 }
 
-/** Applies a ₸/USD rate to the facts. Without a rate the ₸ fields stay null. */
+/**
+ * Applies one ₸/USD rate to the whole window — the owner's manual override for a month.
+ * Without a rate the ₸ fields stay empty.
+ */
 export function withFxRate(facts: MetaFacts | null, rate: number | null): MetaFacts | null {
   if (!facts) return null;
   if (!rate || rate <= 0) return { ...facts, spendKzt: null, fxRate: null };
-  return { ...facts, spendKzt: Math.round(facts.spend * rate), fxRate: rate };
+  return { ...facts, spendKzt: Math.round(facts.spend * rate), fxRate: rate, missingRateDays: [] };
 }
 
 /** Sums the facts of several projects. Reach is never summed into a people count. */
@@ -247,7 +261,9 @@ export function consolidateMetaFacts(list: (MetaFacts | null)[]): MetaFacts | nu
     spend,
     // Only a total that covers every project is a real total.
     spendKzt: kztKnown.length === facts.length ? kztKnown.reduce((a, f) => a + f.spendKzt!, 0) : null,
+    // One rate only if every part worked out at the same one; otherwise the blended figure is shown as unknown.
     fxRate: rates.length === 1 ? rates[0]! : null,
+    missingRateDays: [...new Set(facts.flatMap(f => f.missingRateDays))].sort(),
     impressions,
     reach: null,
     reachDays: add(f => f.reachDays),
@@ -289,6 +305,71 @@ export const META_REGIONS: Record<string, string> = {
 };
 
 export const regionLabel = (region: string) => META_REGIONS[region] ?? region;
+
+/** How an account's spend reaches projects. */
+export type MetaSplitMode = "none" | "project" | "region";
+
+export interface MetaProject { id: string; name: string }
+
+/**
+ * The default project for a region: the two projects named after a city take their own region, and
+ * everything else belongs to the main project, because that is where online sales are taken.
+ * Mirrors the city rules the bank statements already use.
+ */
+export function defaultRegionProject(region: string, projects: MetaProject[], mainId: string): string | null {
+  const find = (needle: string) => projects.find(p => fold(p.name).includes(needle))?.id ?? null;
+  if (region === "Jambyl Region") return find("тараз");
+  if (region === "Kyzylorda Region") return find("кызылорда");
+  return projects.some(p => p.id === mainId) ? mainId : projects[0]?.id ?? null;
+}
+
+/** Folds Kazakh letters and case so «Қызылорда Едусер» matches «кызылорда». */
+const fold = (value: string) => value
+  .toLocaleLowerCase("kk-KZ")
+  .replace(/[әӘ]/g, "а").replace(/[қҚ]/g, "к").replace(/[ұүҰҮ]/g, "у")
+  .replace(/[іІ]/g, "и").replace(/[ңҢ]/g, "н").replace(/[ғҒ]/g, "г")
+  .replace(/[өӨ]/g, "о").replace(/[һҺ]/g, "х");
+
+export interface MetaRegionRule { region: string; projectId: string | null; builtin: boolean }
+
+/** The full region table: the owner's choices on top of the defaults. */
+export function metaRegionRules(
+  regions: string[],
+  projects: MetaProject[],
+  mainId: string,
+  overrides: { region: string; projectId: string | null }[] = [],
+): MetaRegionRule[] {
+  const chosen = new Map(overrides.map(o => [o.region, o.projectId]));
+  return [...new Set([...Object.keys(META_REGIONS), ...regions])]
+    .map(region => chosen.has(region)
+      ? { region, projectId: chosen.get(region)!, builtin: false }
+      : { region, projectId: defaultRegionProject(region, projects, mainId), builtin: true })
+    .sort((a, b) => regionLabel(a.region).localeCompare(regionLabel(b.region), "kk"));
+}
+
+/**
+ * Divides regional rows into per-project days. Region rows carry six decimals, so the parts add back
+ * up to the account's own daily total; spend that maps to no project is returned separately rather
+ * than spread over the others.
+ */
+export function splitRegionsByProject(
+  rows: MetaRegionDay[],
+  rules: MetaRegionRule[],
+): { byProject: Map<string, { date: string; amount: number }[]>; unassigned: number } {
+  const project = new Map(rules.map(r => [r.region, r.projectId]));
+  const byProject = new Map<string, { date: string; amount: number }[]>();
+  let unassigned = 0;
+  for (const row of rows) {
+    const id = project.get(row.region) ?? null;
+    if (!id) { unassigned += row.spend; continue; }
+    const list = byProject.get(id) ?? [];
+    list.push({ date: row.date, amount: row.spend });
+    byProject.set(id, list);
+  }
+  // Full precision here too: rounding a part before it is added back would lose a cent, the same way
+  // rounding each region first does.
+  return { byProject, unassigned };
+}
 
 /** Describes what the reach number in a window actually means, so nobody reads it as people. */
 export function reachNote(facts: MetaFacts): string {

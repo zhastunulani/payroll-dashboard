@@ -26,10 +26,22 @@ export const META_SCHEMA = [
     clicks INTEGER NOT NULL DEFAULT 0, conversations INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(account_id, day, region))`,
   "CREATE INDEX IF NOT EXISTS meta_region_daily_day_idx ON meta_region_daily(day)",
-  // ₸ per USD for a month. Never guessed: the owner enters it, or it is read from the ledger.
+  // ₸ per USD for a month, entered by the owner. Overrides the daily official rates below.
   `CREATE TABLE IF NOT EXISTS meta_fx_rates (
     period TEXT PRIMARY KEY, rate NUMERIC(12,4) NOT NULL, source TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  // The National Bank's official rate per day: each day's spend converts at its own rate, because the
+  // rate moved by more than a tenth over 2026 and one yearly figure would be badly wrong.
+  `CREATE TABLE IF NOT EXISTS fx_daily (
+    day TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'USD', rate NUMERIC(12,4) NOT NULL,
+    source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(day, currency))`,
+  // How one pooled cabinet divides between projects: by the region Meta says the money reached.
+  `CREATE TABLE IF NOT EXISTS meta_region_rules (
+    region TEXT PRIMARY KEY, project_id TEXT REFERENCES workspaces(id),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  // An account either belongs to one project or is split by region.
+  "ALTER TABLE meta_accounts ADD COLUMN IF NOT EXISTS split_mode TEXT NOT NULL DEFAULT 'none'",
   `CREATE TABLE IF NOT EXISTS meta_sync_runs (
     id TEXT PRIMARY KEY, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT,
     status TEXT NOT NULL, accounts INTEGER NOT NULL DEFAULT 0, days INTEGER NOT NULL DEFAULT 0,

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  consolidateMetaFacts, conversationsOf, leadsOf, metaFacts, metaMonthRange, reachNote, regionLabel,
+  consolidateMetaFacts, conversationsOf, defaultRegionProject, leadsOf, metaFacts, metaMonthRange,
+  metaRegionRules, reachNote, regionLabel, splitRegionsByProject,
   toMetaDay, toMetaPeriod, toMetaRegionDay, withFxRate, type MetaInsightRow,
 } from "../lib/meta.ts";
 
@@ -143,4 +144,98 @@ test("the reach note says which of the two numbers it is", () => {
   // The note carries the month's own count, not the sum of days.
   assert.ok(reachNote(whole).includes(periods[0]!.reach.toLocaleString("ru-RU")));
   assert.ok(!reachNote(whole).includes("көрсетілім-күн"));
+});
+
+const PROJECTS = [
+  { id: "workspace-main", name: "EdUser" },
+  { id: "tl", name: "TamshyLab" },
+  { id: "tz", name: "Тараз Едусер" },
+  { id: "kz", name: "Қызылорда Едусер" },
+];
+
+test("a region goes to the project named after its city, everything else to the main one", () => {
+  const of = (region: string) => defaultRegionProject(region, PROJECTS, "workspace-main");
+  assert.equal(of("Jambyl Region"), "tz");
+  assert.equal(of("Kyzylorda Region"), "kz");
+  // Astana is inside Akmola in Meta's list, and the online business takes those sales.
+  assert.equal(of("Akmola Region"), "workspace-main");
+  assert.equal(of("South Kazakhstan Region"), "workspace-main");
+  // Ads also run abroad; that spend belongs to the online project too.
+  assert.equal(of("Dubai"), "workspace-main");
+  assert.equal(of("Unknown"), "workspace-main");
+  // Kazakh spelling is folded, so «Қызылорда Едусер» is found by «кызылорда».
+  assert.equal(defaultRegionProject("Kyzylorda Region", [{ id: "x", name: "ҚЫЗЫЛОРДА ЕДУСЕР" }], "nope"), "x");
+  // With no project named after the city the spend is not guessed onto another project.
+  assert.equal(defaultRegionProject("Jambyl Region", [{ id: "only", name: "EdUser" }], "only"), null);
+});
+
+test("the owner's region choice overrides the default and can be taken back", () => {
+  const seen = ["Jambyl Region", "Dubai"];
+  const plain = metaRegionRules(seen, PROJECTS, "workspace-main");
+  assert.equal(plain.find(r => r.region === "Dubai")!.projectId, "workspace-main");
+  assert.equal(plain.find(r => r.region === "Dubai")!.builtin, true);
+
+  const moved = metaRegionRules(seen, PROJECTS, "workspace-main", [{ region: "Dubai", projectId: "tl" }]);
+  const dubai = moved.find(r => r.region === "Dubai")!;
+  assert.equal(dubai.projectId, "tl");
+  assert.equal(dubai.builtin, false);
+
+  // «Жобасыз» is a real choice, not a missing one: that spend reaches no project.
+  const excluded = metaRegionRules(seen, PROJECTS, "workspace-main", [{ region: "Dubai", projectId: null }]);
+  assert.equal(excluded.find(r => r.region === "Dubai")!.projectId, null);
+  assert.equal(excluded.find(r => r.region === "Dubai")!.builtin, false);
+  // Kazakhstan's regions are always listed, even before any spend has reached them.
+  assert.ok(plain.some(r => r.region === "Mangystau Region"));
+});
+
+test("splitting by region keeps every cent and sets aside what belongs to nobody", () => {
+  const rows = fixture.regionsOneDay.map(r => toMetaRegionDay(ACC, r)!);
+  const rules = metaRegionRules(rows.map(r => r.region), PROJECTS, "workspace-main");
+  const { byProject, unassigned } = splitRegionsByProject(rows, rules);
+  const total = Math.round(rows.reduce((a, r) => a + r.spend, 0) * 100) / 100;
+  const parts = [...byProject.values()].flat().reduce((a, p) => a + p.amount, 0);
+  assert.equal(Math.round((parts + unassigned) * 100) / 100, total);
+  assert.equal(unassigned, 0);
+  // Тараз and Қызылорда each get their own region and nothing else.
+  assert.equal(byProject.get("tz")!.length, 1);
+  assert.equal(byProject.get("kz")!.length, 1);
+  assert.equal(byProject.get("tz")![0]!.amount, rows.find(r => r.region === "Jambyl Region")!.spend);
+
+  // A region sent nowhere is held back instead of being spread over the others.
+  const excluded = metaRegionRules(rows.map(r => r.region), PROJECTS, "workspace-main", [{ region: "Jambyl Region", projectId: null }]);
+  const second = splitRegionsByProject(rows, excluded);
+  assert.equal(second.byProject.has("tz"), false);
+  assert.equal(second.unassigned, rows.find(r => r.region === "Jambyl Region")!.spend);
+});
+
+test("spend converts day by day, and a whole month's manual rate wins over the daily ones", async () => {
+  const { rateLookup } = await import("../lib/fx.ts");
+  const daily = [{ day: "2026-08-01", rate: 462 }, { day: "2026-08-02", rate: 464 }];
+  const plain = rateLookup(daily, []);
+  assert.equal(plain("2026-08-01"), 462);
+  assert.equal(plain("2026-08-02"), 464);
+  assert.equal(plain("2026-08-03"), null);
+
+  // The owner's figure for the month replaces every day in it, including days with no official rate.
+  const overridden = rateLookup(daily, [{ period: "2026-08", rate: 450.91 }]);
+  assert.equal(overridden("2026-08-01"), 450.91);
+  assert.equal(overridden("2026-08-03"), 450.91);
+  assert.equal(overridden("2026-09-01"), null);
+});
+
+test("a month of real days converts to tenge at each day's own rate", () => {
+  // Rates fall through the year, so a flat rate would misstate the month.
+  const rateOf = (day: string) => 470 - Number(day.slice(8)) * 0.5;
+  const facts = metaFacts(days, periods, rateOf)!;
+  const expected = Math.round(days.reduce((a, d) => a + d.spend * rateOf(d.date), 0));
+  assert.equal(facts.spendKzt, expected);
+  assert.deepEqual(facts.missingRateDays, []);
+  assert.ok(facts.fxRate! > 454 && facts.fxRate! < 470);
+
+  // One day without a rate empties the tenge figure and names the day.
+  const gapped = metaFacts(days, periods, day => (day === "2026-08-15" ? null : 460))!;
+  assert.equal(gapped.spendKzt, null);
+  assert.deepEqual(gapped.missingRateDays, ["2026-08-15"]);
+  // The dollar figure is unaffected: only the conversion is unknown.
+  assert.equal(gapped.spend, facts.spend);
 });

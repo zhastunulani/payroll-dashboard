@@ -77,7 +77,7 @@ export type FinanceEntry = {
   source: string;
   note: string;
   relatedId: string;
-  origin: "salary" | "expense" | "legacy" | "import" | "manual";
+  origin: "salary" | "expense" | "legacy" | "import" | "manual" | "meta";
   updatedAt: string;
   costBehavior?: "fixed" | "variable";
   /** Department for payroll rows, expense category for Payroll expenses. */

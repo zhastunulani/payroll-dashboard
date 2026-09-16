@@ -9,7 +9,8 @@ export function useMeta() {
   const syncing = useState("meta:syncing", () => false);
   const error = useState("meta:error", () => "");
   const period = usePeriod();
-  const months = useState("meta:months", () => 6);
+  // A year, so «ай сайын қанша кеткені» is visible without changing the reports' own 6-month window.
+  const months = useState("meta:months", () => 12);
   let sequence = 0;
 
   async function load() {
@@ -118,7 +119,15 @@ export function useMeta() {
         syncing.value = false;
       }
     },
-    saveAccount: (id: string, projectId: string | null, tracked: boolean, note = "") => act({ action: "account", id, projectId, tracked, note }),
+    saveAccount: (id: string, projectId: string | null, tracked: boolean, note = "", splitMode: "none" | "project" | "region" = "none") =>
+      act({ action: "account", id, projectId, tracked, note, splitMode }),
+    saveRegion: (region: string, projectId: string | null, reset = false) => act({ action: "region", region, projectId, reset }),
     saveRate: (forPeriod: string, rate: number | null, source = "Қолмен енгізілген") => act({ action: "rate", period: forPeriod, rate, source }),
+    /** Fills in the official ₸ rates for days that lack one; needs no Meta token. */
+    async backfillRates() {
+      const result = await post<{ ok: true; fetched: number; missing: string[] }>({ action: "rates" });
+      await load();
+      return result;
+    },
   };
 }

@@ -86,24 +86,41 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   hour. In Business Settings → Users → System users, create a user, give it the ad account, then
   «Generate new token» with **`ads_read`** (add `read_insights` for page/post metrics). Such a token has
   no expiry date. Without `ads_read` the panel says so instead of showing zeros.
-- **Spend is in the cabinet's currency (USD here), the dashboard is in ₸.** No rate is ever invented: the
-  owner enters ₸/$ for the month, or it is read from the ledger's own USD target entry for that month
-  (`meta_fx_rates`, then `finance_entries.fx_rate`). With no rate the ₸ figure stays empty rather than zero.
+- **Spend is in the cabinet's currency (USD here), the dashboard is in ₸.** Every day converts at the
+  National Bank of Kazakhstan's official rate for that day (`lib/fx.ts` → `fx_daily`), because the rate
+  moved by more than a tenth across 2026 and one yearly figure would be badly wrong. A month the owner
+  prices by hand (`meta_fx_rates`) overrides every day in it. A day with no published rate leaves the ₸
+  figure empty and names the day, rather than reporting a total that is quietly short. Rates are fetched
+  during the sync and can also be back-filled on their own, without the Meta token
+  (`POST /api/meta {action:"rates"}`) — useful when the token has expired.
 - **Reach is people, not a sum.** Meta counts a person once per period it aggregates, so a month's reach is
   far below the sum of its days — in practice about 2.5× lower. A window that is exactly one month of one
   account shows the real count; any other window shows «көрсетілім-күн» and says why. Spend, impressions
   and clicks do add up, and reconcile to Meta's monthly figures to the cent.
-- **One cabinet, four projects.** Only accounts pointed at a project feed a project P&L
-  (`metaFactsWindow`); an account that spends but is unassigned is named in a warning and reaches nobody's
-  report. The regional split (`meta_region_daily`) is the evidence for dividing one pooled account:
-  Meta apportions the day's spend with six decimals, so those rows keep six decimals and are rounded only
-  after summing — rounding each region first loses a cent off the day.
+- **One cabinet, four projects.** An account is either assigned to one project or **divided by region**
+  (`meta_accounts.split_mode`). An account the owner has not decided on contributes nothing and is named
+  in a warning, so spend is never attributed by guesswork. The regional division uses Meta's own
+  `meta_region_daily` rows and therefore adds back up to the cabinet's total to the cent; the defaults
+  follow the same city logic as the bank statements — Jambyl → Тараз, Kyzylorda → Қызылорда, everything
+  else (Kazakhstan's other regions and spend delivered abroad) to the online project — and any region can
+  be moved or excluded in the panel. Meta apportions the day's spend with six decimals, so those rows and
+  the unassigned remainder keep six decimals and are rounded only after summing.
+- **Target spend reaches unit economics by itself.** `loadFinance` injects one marketing entry per
+  project-month from Meta (in ₸, `origin: "meta"`) and marks the hand-entered «Таргет» rows for that
+  project-month as duplicates, mirroring how bank receipts replace manual revenue. CPL, CAC, ROMI, the
+  marketing share and the six-month chart then all run on the cabinet's real numbers, and the money is
+  never counted twice. A project whose advertising runs through a cabinet the token cannot see keeps its
+  typed figure.
 - **Re-syncing is safe.** Every row is keyed by account + day (+ region), so a repeated sync overwrites
   instead of adding: finished months never move, and no duplicates are possible. Runs are logged in
   `meta_sync_runs`; one failing account never loses the others.
 - **The panel also reconciles.** It prints what the ledger holds for the month next to the cabinet's own
   figure and the difference, because a hand-entered target row often covers only part of the month.
-- **Storage:** `meta_accounts` (name, currency, project, tracked), `meta_daily`, `meta_period` (Meta's own
-  monthly aggregate — the only source of a deduplicated reach), `meta_region_daily`, `meta_fx_rates`,
-  `meta_sync_runs` (`lib/meta-schema.ts`). API: `GET /api/meta?period=&months=`, `POST /api/meta`
-  (`sync`, `account`, `rate`).
+- **The panel** (`MetaTargetPanel.vue`, on «Юнит және таргет») leads with ₸ and shows the dollar figure
+  underneath, then the month per project, the month-by-month history for a year, the daily bars, and the
+  regional table with the project each region is assigned to. Everything it shows comes from the same
+  server-side attribution the reports use, so the two can never disagree.
+- **Storage:** `meta_accounts` (name, currency, project, tracked, split_mode), `meta_daily`, `meta_period`
+  (Meta's own monthly aggregate — the only source of a deduplicated reach), `meta_region_daily`,
+  `meta_region_rules`, `meta_fx_rates`, `fx_daily`, `meta_sync_runs` (`lib/meta-schema.ts`).
+  API: `GET /api/meta?period=&months=`, `POST /api/meta` (`sync`, `account`, `region`, `rate`, `rates`).

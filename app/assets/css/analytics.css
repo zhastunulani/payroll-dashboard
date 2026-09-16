@@ -306,6 +306,11 @@ g.dim .chart-cap { opacity: .4; }
   .meta-rate { max-width: none; }
 }
 
+/* Totals row and empty state inside the Meta tables. */
+.pnl-table .pnl-total th, .pnl-table .pnl-total td { border-top: 1px solid var(--line); background: #f8f9fd; font-weight: 700; }
+.meta-empty { padding: 14px 0; color: var(--muted); font-size: 11.5px; }
+.meta-panel .pnl-table tbody th i { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 3px; vertical-align: middle; }
+
 /* The warning line is an icon next to text, so it needs to be a row rather than a block. */
 .meta-setup.warn { display: flex; align-items: flex-start; gap: 7px; }
 /* A month of daily bars is too many for a phone to label each one: the tooltip and the «Кесте» view

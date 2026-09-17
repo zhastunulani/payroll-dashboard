@@ -77,6 +77,8 @@ const missingScope = computed(() => {
 });
 /** Accounts that spend but have not been told where the money belongs. */
 const undecided = computed(() => spending.value.filter(a => a.splitMode === "none"));
+/** Accounts divided between projects by region, rather than belonging to one. */
+const splitByRegion = computed(() => spending.value.filter(a => a.splitMode === "region"));
 
 const daily = computed(() => {
   const list = meta.series(null).filter(r => r.date >= `${period.value}-01` && r.date <= `${period.value}-31`);
@@ -285,9 +287,17 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
         {{ showAllRegions ? "Тек негізгілерін көрсету" : `Барлық ${regions.length} өңірді көрсету` }}
       </button>
       <p class="panel-footnote">
-        Жарнама бүкіл Қазақстанға кетеді. Өңір арқылы бөлу — Meta-ның өз дерегі, сондықтан жобалардың
-        қосындысы кабинеттің сомасына тиынына дейін тең. Жамбыл → Тараз, Қызылорда → Қызылорда, қалғаны
-        негізгі жобаға (онлайн сатылым сол жерде есептеледі). Кез келген өңірді қолмен ауыстыруға болады.
+        <template v-if="splitByRegion.length">
+          {{ splitByRegion.map(a => a.name).join(", ") }} — өңірлер бойынша бөлінеді: Meta-ның өз дерегі,
+          сондықтан жобалардың қосындысы кабинеттің сомасына тиынына дейін тең. Жамбыл → Тараз,
+          Қызылорда → Қызылорда, қалғаны негізгі жобаға (онлайн сатылым сол жерде есептеледі).
+          Кез келген өңірді қолмен ауыстыруға болады.
+        </template>
+        <template v-else>
+          Әр жобаның өз кабинеті бар, сондықтан шығын кабинет бойынша бөлінеді — бұл дәл әдіс.
+          Бұл кесте ақшаның қай өңірге кеткенін көрсетеді, бөлуге әсер етпейді. Бір кабинетті
+          бірнеше жобаға бөлу керек болса, «Кабинеттер» бөлімінен «Өңірлер бойынша бөлу» деп қойыңыз.
+        </template>
       </p>
     </template>
     <p v-else-if="token?.present" class="meta-note">Бұл айға дерек жоқ. «Жаңарту» батырмасын басып, кабинеттен тартыңыз.</p>

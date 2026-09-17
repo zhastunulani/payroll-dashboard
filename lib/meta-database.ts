@@ -240,22 +240,17 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
 }
 
 /**
- * The rate for a month: the owner's entry wins; otherwise the ledger's own USD target entry for that
- * month supplies it, because that is the number already used in the reports.
+ * Monthly rate overrides — only what the owner entered by hand.
+ *
+ * A rate found in an old ledger row is deliberately *not* used: those were single snapshots (one
+ * report was priced at the National Bank's rate for the 13th and applied to the whole month), and
+ * letting one stand in for a month would override the day-by-day official rates with something less
+ * accurate. Only a deliberate entry wins over them.
  */
 export async function metaRates(): Promise<{ period: string; rate: number; source: string }[]> {
-  const db = getRawDb();
-  const [manual, ledger] = await Promise.all([
-    db.prepare("SELECT period, rate, source FROM meta_fx_rates").all<{ period: string; rate: string | number; source: string }>(),
-    db.prepare(`SELECT period, round(avg(fx_rate)::numeric, 4) AS rate FROM finance_entries
-      WHERE currency = 'USD' AND fx_rate > 0 AND category = 'marketing' GROUP BY period`)
-      .all<{ period: string; rate: string | number }>()
-      .catch(() => ({ results: [] as { period: string; rate: string | number }[] })),
-  ]);
-  const out = new Map<string, { period: string; rate: number; source: string }>();
-  for (const r of ledger.results) out.set(r.period, { period: r.period, rate: Number(r.rate), source: "Реестрдегі таргет жазбасының бағамы" });
-  for (const r of manual.results) out.set(r.period, { period: r.period, rate: Number(r.rate), source: r.source || "Қолмен енгізілген" });
-  return [...out.values()].sort((a, b) => a.period.localeCompare(b.period));
+  const manual = await getRawDb().prepare("SELECT period, rate, source FROM meta_fx_rates ORDER BY period")
+    .all<{ period: string; rate: string | number; source: string }>();
+  return manual.results.map(r => ({ period: r.period, rate: Number(r.rate), source: r.source || "Қолмен енгізілген" }));
 }
 
 export async function saveMetaRate(period: string, rate: number | null, source: string) {
@@ -337,8 +332,10 @@ export async function saveRegionRule(region: string, projectId: string | null, r
 export async function saveMetaAccount(id: string, projectId: string | null, tracked: boolean, note: string, splitMode: MetaSplitMode = "none") {
   await ensureMetaDatabase();
   const mode: MetaSplitMode = splitMode === "region" ? "region" : projectId ? "project" : "none";
-  await getRawDb().prepare(`UPDATE meta_accounts SET project_id=?, tracked=?, note=?, split_mode=?, updated_at=? WHERE id=?`)
+  const result = await getRawDb().prepare(`UPDATE meta_accounts SET project_id=?, tracked=?, note=?, split_mode=?, updated_at=? WHERE id=?`)
     .bind(mode === "region" ? null : projectId, tracked ? 1 : 0, note, mode, new Date().toISOString(), id).run();
+  // Saying nothing when the account is unknown would look like success and quietly change nothing.
+  if (!result.meta.changes) throw new Error(`«${id}» кабинеті тізімде жоқ. Алдымен «Жаңарту» арқылы кабинеттерді тартыңыз.`);
 }
 
 /** Everything the target screen needs for a window of months. */

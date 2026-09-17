@@ -86,10 +86,16 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   hour. In Business Settings → Users → System users, create a user, give it the ad account, then
   «Generate new token» with **`ads_read`** (add `read_insights` for page/post metrics). Such a token has
   no expiry date. Without `ads_read` the panel says so instead of showing zeros.
+- **Every ad account the token can read is found.** `me/adaccounts` lists only accounts the person has
+  a role on; each project's own cabinet belongs to a *business*, so the discovery also walks
+  `me/businesses` → `owned_ad_accounts` / `client_ad_accounts`. That needs `business_management` on the
+  token — without it those cabinets are invisible, which is exactly why the per-project ones were missed
+  at first. A business lookup that fails never loses the accounts already found.
 - **Spend is in the cabinet's currency (USD here), the dashboard is in ₸.** Every day converts at the
   National Bank of Kazakhstan's official rate for that day (`lib/fx.ts` → `fx_daily`), because the rate
-  moved by more than a tenth across 2026 and one yearly figure would be badly wrong. A month the owner
-  prices by hand (`meta_fx_rates`) overrides every day in it. A day with no published rate leaves the ₸
+  moved by more than a tenth across 2026 and one yearly figure would be badly wrong. Only a rate the
+  owner enters by hand (`meta_fx_rates`) overrides the daily ones; a rate found in an old ledger row is
+  deliberately ignored, because those were single snapshots applied to a whole month. A day with no published rate leaves the ₸
   figure empty and names the day, rather than reporting a total that is quietly short. Rates are fetched
   during the sync and can also be back-filled on their own, without the Meta token
   (`POST /api/meta {action:"rates"}`) — useful when the token has expired.
@@ -97,8 +103,11 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   far below the sum of its days — in practice about 2.5× lower. A window that is exactly one month of one
   account shows the real count; any other window shows «көрсетілім-күн» and says why. Spend, impressions
   and clicks do add up, and reconcile to Meta's monthly figures to the cent.
-- **One cabinet, four projects.** An account is either assigned to one project or **divided by region**
-  (`meta_accounts.split_mode`). An account the owner has not decided on contributes nothing and is named
+- **One cabinet per project, where they exist.** Each project turned out to have its own cabinet
+  («EDUSER QYZYLORDA», «Eduser TARAZ», «Tamshy таргет»), and the owner's own Excel report matched those
+  cabinets to the cent — so spend is attributed per cabinet, which is exact. An account is either
+  assigned to one project or **divided by region** (`meta_accounts.split_mode`), the fallback for a
+  pooled cabinet that serves several projects. An account the owner has not decided on contributes nothing and is named
   in a warning, so spend is never attributed by guesswork. The regional division uses Meta's own
   `meta_region_daily` rows and therefore adds back up to the cabinet's total to the cent; the defaults
   follow the same city logic as the bank statements — Jambyl → Тараз, Kyzylorda → Қызылорда, everything

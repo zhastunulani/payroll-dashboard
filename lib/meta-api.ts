@@ -127,8 +127,36 @@ export interface MetaRawAccount {
   amount_spent?: string;
 }
 
-export function metaAdAccounts(options: MetaFetchOptions): Promise<MetaRawAccount[]> {
-  return all<MetaRawAccount>("me/adaccounts", { fields: "id,name,currency,timezone_name,account_status,amount_spent", limit: "100" }, options);
+const ACCOUNT_FIELDS = "id,name,currency,timezone_name,account_status,amount_spent";
+
+/**
+ * Every ad account the token can read.
+ *
+ * `me/adaccounts` only lists accounts the person has a role on. A business's own accounts — the ones
+ * each project's targetologist runs — are reachable only through the businesses, and only when the
+ * token carries `business_management`. Without that permission the business lookup fails and the
+ * personal list is returned on its own, which is why the per-project cabinets stayed invisible.
+ */
+export async function metaAdAccounts(options: MetaFetchOptions): Promise<MetaRawAccount[]> {
+  const found = new Map<string, MetaRawAccount>();
+  for (const account of await all<MetaRawAccount>("me/adaccounts", { fields: ACCOUNT_FIELDS, limit: "100" }, options)) {
+    found.set(account.id, account);
+  }
+  // A missing business permission must not lose the accounts we already have.
+  const businesses = await all<{ id: string; name: string }>("me/businesses", { fields: "id,name", limit: "100" }, options)
+    .catch(() => [] as { id: string; name: string }[]);
+  for (const business of businesses) {
+    for (const edge of ["owned_ad_accounts", "client_ad_accounts"]) {
+      const list = await all<MetaRawAccount>(`${business.id}/${edge}`, { fields: ACCOUNT_FIELDS, limit: "200" }, options)
+        .catch(() => [] as MetaRawAccount[]);
+      for (const account of list) if (!found.has(account.id)) found.set(account.id, account);
+    }
+  }
+  return [...found.values()];
+}
+
+export function metaBusinesses(options: MetaFetchOptions): Promise<{ id: string; name: string }[]> {
+  return all<{ id: string; name: string }>("me/businesses", { fields: "id,name", limit: "100" }, options);
 }
 
 const INSIGHT_FIELDS = "spend,impressions,reach,frequency,clicks,actions";

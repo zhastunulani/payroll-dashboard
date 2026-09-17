@@ -11,6 +11,15 @@ import { convertDaily } from "./fx.ts";
 
 export const META_API_VERSION = "v21.0";
 
+/**
+ * Reads one or several tokens out of a single environment variable, separated by commas, spaces or
+ * newlines. Several are needed because a Meta system user belongs to one business, and cabinets can
+ * be spread over more than one.
+ */
+export function parseTokens(value: string | undefined): string[] {
+  return [...new Set((value ?? "").split(/[,;\s]+/).map(t => t.trim()).filter(Boolean))];
+}
+
 /** One ad account as Meta describes it, plus the project its spending belongs to. */
 export interface MetaAccount {
   id: string;

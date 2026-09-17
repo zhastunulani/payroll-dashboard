@@ -60,16 +60,36 @@ const historyChart = computed(() => ({
   })),
 }));
 
-const tokenState = computed(() => {
-  const t = token.value;
-  if (!t?.present) return { tone: "off", text: "Токен қосылмаған" };
-  if (!t.valid) return { tone: "bad", text: "Токен жарамсыз немесе мерзімі бітті" };
+/** One line per token: whether it works, how long it lasts and which businesses it reaches. */
+const tokenList = computed(() => (meta.data.value?.tokens ?? []).map(t => {
   const expires = t.expiresAt ? new Date(t.expiresAt) : null;
-  if (!expires) return { tone: "good", text: "Тұрақты токен" };
-  const hours = (expires.getTime() - Date.now()) / 3_600_000;
-  if (hours <= 0) return { tone: "bad", text: "Токеннің мерзімі бітті" };
-  if (hours < 72) return { tone: "warn", text: `Токен ${hours < 1 ? "1 сағаттан аз" : `${Math.round(hours)} сағат`} ішінде бітеді` };
-  return { tone: "good", text: `Токен ${expires.toLocaleDateString("ru-RU")} дейін` };
+  const hours = expires ? (expires.getTime() - Date.now()) / 3_600_000 : Infinity;
+  const life = !t.valid
+    ? { tone: "bad", text: "жарамсыз немесе мерзімі бітті" }
+    : !expires
+      ? { tone: "good", text: "мерзімі жоқ — тұрақты" }
+      : hours <= 0
+        ? { tone: "bad", text: "мерзімі бітті" }
+        : hours < 72
+          ? { tone: "warn", text: `${hours < 1 ? "1 сағаттан аз" : `${Math.round(hours)} сағат`} ішінде бітеді` }
+          : { tone: "warn", text: `${expires.toLocaleDateString("ru-RU")} дейін — уақытша` };
+  return {
+    ...t, ...life,
+    // A system-user token is the only kind that does not expire; naming the type makes the difference plain.
+    kind: t.type === "SYSTEM_USER" ? "Жүйелік пайдаланушы" : t.type === "USER" ? "Жеке (уақытша)" : t.type || "—",
+    missing: ["ads_read", "business_management"].filter(need => !t.scopes.includes(need)),
+  };
+}));
+const tokenState = computed(() => {
+  const list = tokenList.value;
+  if (!list.length) return { tone: "off", text: "Токен қосылмаған" };
+  const working = list.filter(t => t.valid && t.tone !== "bad");
+  if (!working.length) return { tone: "bad", text: list.length > 1 ? "Токендер жарамсыз" : "Токен жарамсыз немесе мерзімі бітті" };
+  const permanent = working.filter(t => !t.expiresAt);
+  const label = list.length > 1 ? `${working.length}/${list.length} токен` : "Токен";
+  if (permanent.length === working.length) return { tone: "good", text: `${label} — тұрақты` };
+  const soonest = working.filter(t => t.expiresAt).sort((a, b) => a.expiresAt!.localeCompare(b.expiresAt!))[0]!;
+  return { tone: soonest.tone, text: `${label} — ${soonest.text}` };
 });
 const missingScope = computed(() => {
   const t = token.value;
@@ -349,7 +369,24 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
     <p v-else-if="token?.present" class="meta-note">Бұл айға дерек жоқ. «Жаңарту» батырмасын басып, кабинеттен тартыңыз.</p>
 
     <details class="meta-settings">
-      <summary>Кабинеттер</summary>
+      <summary>Кабинеттер және токендер</summary>
+      <div v-if="tokenList.length" class="table-scroll">
+        <table class="pnl-table compact">
+          <thead><tr><th scope="col">Токен</th><th scope="col">Түрі</th><th scope="col">Мерзімі</th><th scope="col">Қандай бизнесті көреді</th></tr></thead>
+          <tbody>
+            <tr v-for="t in tokenList" :key="t.hint">
+              <th scope="row">…{{ t.hint }}<small v-if="t.missing.length">рұқсат жоқ: {{ t.missing.join(", ") }}</small></th>
+              <td>{{ t.kind }}</td>
+              <td :class="t.tone === 'bad' ? 'negative' : t.tone === 'warn' ? 'warn' : 'positive'">{{ t.text }}</td>
+              <td>{{ t.businesses.length ? t.businesses.join(", ") : "—" }}<small class="cell-sub">{{ t.accounts }} кабинет</small></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="tokenList.length > 0" class="panel-footnote">
+        Бір жүйелік пайдаланушы бір бизнеске тиесілі. Кабинеттер екі бизнесте болғандықтан, екі токен
+        керек — оларды <code>META_ACCESS_TOKEN</code> ішіне үтірмен қатар жазуға болады.
+      </p>
       <div v-if="spending.length" class="table-scroll">
         <table class="pnl-table compact">
           <thead><tr><th scope="col">Кабинет</th><th scope="col">Дерек</th><th scope="col">Қалай бөлінеді</th></tr></thead>

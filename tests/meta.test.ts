@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   consolidateMetaFacts, conversationsOf, defaultRegionProject, leadsOf, metaFacts, metaMonthRange,
-  metaRegionRules, reachNote, regionLabel, splitRegionsByProject,
+  metaRegionRules, parseTokens, reachNote, regionLabel, splitRegionsByProject,
   toMetaDay, toMetaPeriod, toMetaRegionDay, withFxRate, type MetaInsightRow,
 } from "../lib/meta.ts";
 
@@ -286,4 +286,17 @@ test("pooling projects adds the events and drops the people", () => {
   assert.equal(total.landingViews, a.landingViews + b.landingViews);
   assert.equal(total.linkClickPeople, null);
   assert.equal(total.linkClickPeopleDays, a.linkClickPeopleDays + b.linkClickPeopleDays);
+});
+
+test("one variable can hold several tokens, because a system user covers one business", () => {
+  assert.deepEqual(parseTokens("abc"), ["abc"]);
+  assert.deepEqual(parseTokens("abc,def"), ["abc", "def"]);
+  // Commas, spaces and newlines all separate, and stray whitespace is trimmed.
+  assert.deepEqual(parseTokens(" abc , def \n ghi "), ["abc", "def", "ghi"]);
+  assert.deepEqual(parseTokens("abc\ndef;ghi"), ["abc", "def", "ghi"]);
+  // The same token pasted twice is one token, not two failing calls.
+  assert.deepEqual(parseTokens("abc,abc"), ["abc"]);
+  assert.deepEqual(parseTokens(""), []);
+  assert.deepEqual(parseTokens(undefined), []);
+  assert.deepEqual(parseTokens("  "), []);
 });

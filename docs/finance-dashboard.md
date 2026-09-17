@@ -83,9 +83,14 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   learns whether it is valid and when it expires (checked at most once every five minutes, so opening a
   page never waits on Facebook).
 - **The token must be a system-user token.** A token copied out of the Graph API Explorer dies within the
-  hour. In Business Settings → Users → System users, create a user, give it the ad account, then
-  «Generate new token» with **`ads_read`** (add `read_insights` for page/post metrics). Such a token has
-  no expiry date. Without `ads_read` the panel says so instead of showing zeros.
+  hour. In Business Settings → Users → System users, create a user, give it the ad accounts **and the
+  app**, then «Generate new token» with **`ads_read`** and **`business_management`**. Such a token has no
+  expiry date. Without `ads_read` the panel says so instead of showing zeros.
+- **Several tokens are allowed**, comma-separated in `META_ACCESS_TOKEN`, because a system user belongs to
+  one business and the owner's cabinets sit in two (EDUSER and Tamshy Lab). Each token is asked for the
+  accounts it can read and the results are merged; a token that fails is named in the sync message and
+  loses none of the others. The panel lists every token with its type, expiry and the businesses it
+  reaches, so «is there access?» has a visible answer.
 - **Every ad account the token can read is found.** `me/adaccounts` lists only accounts the person has
   a role on; each project's own cabinet belongs to a *business*, so the discovery also walks
   `me/businesses` → `owned_ad_accounts` / `client_ad_accounts`. That needs `business_management` on the

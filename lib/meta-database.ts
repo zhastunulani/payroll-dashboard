@@ -1,12 +1,12 @@
 import { getRawDb, MAIN_WORKSPACE_ID } from "./database";
 import { nbkRates, rateLookup } from "./fx.ts";
 import {
-  consolidateMetaFacts, metaFacts, metaMonth, metaMonthRange, metaRegionRules,
+  consolidateMetaFacts, metaFacts, metaMonth, metaMonthRange, metaRegionRules, parseTokens,
   toMetaDay, toMetaPeriod, toMetaRegionDay,
   type MetaAccount, type MetaDay, type MetaFacts, type MetaPeriod, type MetaProject, type MetaRegionDay,
   type MetaRegionRule, type MetaSplitMode, type MetaSyncRun,
 } from "./meta.ts";
-import { metaAdAccounts, metaInsights, metaTokenInfo, type MetaFetchOptions, type MetaTokenInfo } from "./meta-api.ts";
+import { metaAdAccounts, metaBusinesses, metaInsights, metaTokenInfo, type MetaFetchOptions, type MetaRawAccount, type MetaTokenInfo } from "./meta-api.ts";
 import { META_SCHEMA } from "./meta-schema.ts";
 
 let ready: Promise<void> | null = null;
@@ -15,8 +15,16 @@ export function ensureMetaDatabase() {
   return ready;
 }
 
-/** The token lives only in the environment; it is never stored in the database or sent to the browser. */
-export const metaToken = () => process.env.META_ACCESS_TOKEN?.trim() ?? "";
+/**
+ * The tokens live only in the environment; they are never stored in the database or sent to the browser.
+ *
+ * More than one is allowed, separated by commas or newlines: a Meta system user belongs to a single
+ * business, and the owner's cabinets are spread over two, so one token cannot reach them all. Each
+ * token is tried for the accounts it can read and the results are merged.
+ */
+export const metaTokens = (): string[] => parseTokens(process.env.META_ACCESS_TOKEN);
+/** The first token, for calls that only need to know whether the integration is configured at all. */
+export const metaToken = () => metaTokens()[0] ?? "";
 
 /**
  * Checking a token costs a round trip to Meta, so the answer is cached: opening a page must not wait
@@ -24,14 +32,24 @@ export const metaToken = () => process.env.META_ACCESS_TOKEN?.trim() ?? "";
  * critical path.
  */
 const TOKEN_TTL = 5 * 60_000;
-let tokenCache: { token: string; at: number; info: MetaTokenInfo } | null = null;
-async function cachedTokenInfo(token: string): Promise<MetaTokenInfo> {
-  if (tokenCache && tokenCache.token === token && Date.now() - tokenCache.at < TOKEN_TTL) return tokenCache.info;
-  const blank: MetaTokenInfo = { valid: false, type: "", appId: "", appName: "", expiresAt: null, dataAccessExpiresAt: null, scopes: [], userId: "" };
-  const info = await metaTokenInfo({ token, deadline: Date.now() + 8_000 }).catch(() => blank);
+const BLANK_TOKEN: MetaTokenInfo = { valid: false, type: "", appId: "", appName: "", expiresAt: null, dataAccessExpiresAt: null, scopes: [], userId: "" };
+const tokenCache = new Map<string, { at: number; status: MetaTokenStatus }>();
+
+async function cachedTokenInfo(token: string): Promise<MetaTokenStatus> {
+  const cached = tokenCache.get(token);
+  if (cached && Date.now() - cached.at < TOKEN_TTL) return cached.status;
+  const info = await metaTokenInfo({ token, deadline: Date.now() + 8_000 }).catch(() => BLANK_TOKEN);
+  // Which businesses and how many cabinets this token actually reaches: the answer to «доступ бар ма?».
+  const businesses = info.valid
+    ? await metaBusinesses({ token, deadline: Date.now() + 8_000 }).then(list => list.map(b => b.name)).catch(() => [])
+    : [];
+  const accounts = info.valid
+    ? await metaAdAccounts({ token, deadline: Date.now() + 15_000 }).then(list => list.length).catch(() => 0)
+    : 0;
+  const status: MetaTokenStatus = { ...info, hint: token.slice(-6), businesses, accounts };
   // A failed check is not cached: the next page load tries again.
-  if (info.valid) tokenCache = { token, at: Date.now(), info };
-  return info;
+  if (info.valid) tokenCache.set(token, { at: Date.now(), status });
+  return status;
 }
 
 type AccountRow = {
@@ -58,9 +76,18 @@ const mapDay = (r: DayRow): MetaDay => ({
   conversations: Number(r.conversations), leads: Number(r.leads),
 });
 
+export interface MetaTokenStatus extends MetaTokenInfo {
+  /** Last six characters, so one token can be told from another without revealing it. */
+  hint: string;
+  businesses: string[];
+  accounts: number;
+}
+
 export interface MetaData {
   connected: boolean;
   token: (MetaTokenInfo & { present: true }) | { present: false; message: string };
+  /** One entry per configured token. */
+  tokens: MetaTokenStatus[];
   accounts: MetaAccount[];
   days: MetaDay[];
   periods: MetaPeriod[];
@@ -146,12 +173,13 @@ async function syncFxRates(days: string[], deadline: number, fetchImpl?: typeof 
  */
 export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult> {
   await ensureMetaDatabase();
-  const token = metaToken();
-  if (!token) throw new Error("META_ACCESS_TOKEN орнатылмаған. Токенді .env файлына қосыңыз.");
+  const tokens = metaTokens();
+  if (!tokens.length) throw new Error("META_ACCESS_TOKEN орнатылмаған. Токенді .env файлына қосыңыз.");
   const db = getRawDb();
   const runId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const fetchOptions: MetaFetchOptions = { token, deadline: Date.now() + 8 * 60_000, fetchImpl: options.fetchImpl };
+  const deadline = Date.now() + 8 * 60_000;
+  const optionsFor = (token: string): MetaFetchOptions => ({ token, deadline, fetchImpl: options.fetchImpl });
   await db.prepare("INSERT INTO meta_sync_runs(id, started_at, status, range_from, range_to) VALUES(?,?,?,?,?)")
     .bind(runId, now, "running", options.from, options.to).run();
 
@@ -161,9 +189,22 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
   };
 
   try {
-    // 1. Refresh the account list. A new account arrives untracked with no project, so nothing is
-    //    silently attributed to a project the owner did not choose.
-    const raw = await metaAdAccounts(fetchOptions);
+    // 1. Refresh the account list, asking every token. Each one reaches its own business, so the
+    //    account is remembered together with the token that can read it. A new account arrives
+    //    untracked with no project, so nothing is attributed to a project the owner did not choose.
+    const raw: MetaRawAccount[] = [];
+    const readableWith = new Map<string, string>();
+    const tokenErrors: string[] = [];
+    for (const token of tokens) {
+      try {
+        for (const account of await metaAdAccounts(optionsFor(token))) {
+          if (!readableWith.has(account.id)) { readableWith.set(account.id, token); raw.push(account); }
+        }
+      } catch (error) {
+        tokenErrors.push(`…${token.slice(-6)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!raw.length) throw new Error(tokenErrors.length ? `Бірде-бір токен жұмыс істемеді. ${tokenErrors.join(" | ")}` : "Бірде-бір жарнама кабинеті табылмады.");
     const known = new Set((await db.prepare("SELECT id FROM meta_accounts").all<{ id: string }>()).results.map(r => r.id));
     const discovered = raw.filter(a => !known.has(a.id)).map(a => a.id);
     await upsertChunks(
@@ -184,6 +225,7 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
     const spendDays: string[] = [];
     const skipped: { id: string; reason: string }[] = [];
     for (const account of wanted) {
+      const fetchOptions = optionsFor(readableWith.get(account.id) ?? tokens[0]!);
       try {
         const daily = (await metaInsights({ accountId: account.id, from: options.from, to: options.to, increment: "1" }, fetchOptions))
           .map(row => toMetaDay(account.id, row))
@@ -234,7 +276,11 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
     // 3. The ₸ rate for each spending day. A failure here loses no Meta data: ₸ simply stays empty.
     const rates = await syncFxRates(spendDays, Date.now() + 4 * 60_000, options.fetchImpl).catch(() => 0);
 
-    const message = skipped.length ? `${skipped.length} аккаунт оқылмады: ${skipped.map(s => `${s.id} — ${s.reason}`).join("; ")}` : "";
+    const notes = [
+      ...(tokenErrors.length ? [`${tokenErrors.length} токен оқылмады: ${tokenErrors.join("; ")}`] : []),
+      ...(skipped.length ? [`${skipped.length} аккаунт оқылмады: ${skipped.map(s => `${s.id} — ${s.reason}`).join("; ")}`] : []),
+    ];
+    const message = notes.join(" · ");
     await finish("ok", wanted.length - skipped.length, totalDays, message);
     return { ok: true, accounts: wanted.length - skipped.length, days: totalDays, regionRows, rates, discovered, skipped, message };
   } catch (error) {
@@ -347,7 +393,7 @@ export async function saveMetaAccount(id: string, projectId: string | null, trac
 export async function loadMeta(from: string, to: string): Promise<MetaData> {
   await ensureMetaDatabase();
   const db = getRawDb();
-  const token = metaToken();
+  const tokens = metaTokens();
   // The month on screen. Only its rows are sent: a year of raw daily and regional rows was almost a
   // megabyte of JSON, and the page charts one month at a time — the rest of the year comes as `history`.
   const month = metaMonth(to);
@@ -383,11 +429,14 @@ export async function loadMeta(from: string, to: string): Promise<MetaData> {
   // `metaRaw` already limits itself to tracked accounts, so only the month has to be narrowed here.
   const inMonth = <T extends { date: string }>(rows: T[]) => rows.filter(r => r.date >= shown.from && r.date <= shown.to);
   const run = lastRun.results[0];
+  const tokenStatuses = await Promise.all(tokens.map(cachedTokenInfo));
   return {
-    connected: Boolean(token),
-    token: token
-      ? { present: true, ...await cachedTokenInfo(token) }
+    connected: tokens.length > 0,
+    // Kept for callers that only ask «is it connected»: the first working token, else the first one.
+    token: tokens.length
+      ? { present: true, ...(tokenStatuses.find(t => t.valid) ?? tokenStatuses[0]!) }
       : { present: false, message: "META_ACCESS_TOKEN орнатылмаған." },
+    tokens: tokenStatuses,
     accounts: accounts.results.map(mapAccount),
     days: inMonth(raw.days),
     periods: raw.periods.filter(p => months.includes(p.period)),

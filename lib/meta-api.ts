@@ -159,7 +159,12 @@ export function metaBusinesses(options: MetaFetchOptions): Promise<{ id: string;
   return all<{ id: string; name: string }>("me/businesses", { fields: "id,name", limit: "100" }, options);
 }
 
-const INSIGHT_FIELDS = "spend,impressions,reach,frequency,clicks,actions";
+/**
+ * `clicks` counts every click, likes and comments included, so it says little about traffic.
+ * `inline_link_clicks` is the link itself and `unique_inline_link_clicks` is how many *people*
+ * followed it; `landing_page_view` (in `actions`) is how many actually arrived.
+ */
+const INSIGHT_FIELDS = "spend,impressions,reach,frequency,clicks,inline_link_clicks,unique_inline_link_clicks,actions";
 
 export interface MetaInsightQuery {
   accountId: string;

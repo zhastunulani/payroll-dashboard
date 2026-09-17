@@ -47,10 +47,15 @@ const mapAccount = (r: AccountRow): MetaAccount => ({
   firstDate: r.first_date, lastDate: r.last_date, days: Number(r.days ?? 0),
 });
 
-type DayRow = { account_id: string; day: string; spend: string | number; impressions: number; reach: number; clicks: number; conversations: number; leads: number };
+type DayRow = {
+  account_id: string; day: string; spend: string | number; impressions: number; reach: number; clicks: number;
+  link_clicks: number; link_click_people: number; landing_views: number; conversations: number; leads: number;
+};
 const mapDay = (r: DayRow): MetaDay => ({
   accountId: r.account_id, date: r.day, spend: Number(r.spend), impressions: Number(r.impressions),
-  reach: Number(r.reach), clicks: Number(r.clicks), conversations: Number(r.conversations), leads: Number(r.leads),
+  reach: Number(r.reach), clicks: Number(r.clicks), linkClicks: Number(r.link_clicks ?? 0),
+  linkClickPeople: Number(r.link_click_people ?? 0), landingViews: Number(r.landing_views ?? 0),
+  conversations: Number(r.conversations), leads: Number(r.leads),
 });
 
 export interface MetaData {
@@ -187,9 +192,9 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
         if (daily.length) {
           await upsertChunks(
             "meta_daily",
-            ["account_id", "day", "spend", "impressions", "reach", "clicks", "conversations", "leads", "updated_at"],
+            ["account_id", "day", "spend", "impressions", "reach", "clicks", "link_clicks", "link_click_people", "landing_views", "conversations", "leads", "updated_at"],
             ["account_id", "day"],
-            daily.map(d => [d.accountId, d.date, d.spend, d.impressions, d.reach, d.clicks, d.conversations, d.leads, now]),
+            daily.map(d => [d.accountId, d.date, d.spend, d.impressions, d.reach, d.clicks, d.linkClicks, d.linkClickPeople, d.landingViews, d.conversations, d.leads, now]),
           );
           totalDays += daily.length;
         }
@@ -201,9 +206,9 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
         if (monthly.length) {
           await upsertChunks(
             "meta_period",
-            ["account_id", "period", "spend", "impressions", "reach", "clicks", "conversations", "leads", "updated_at"],
+            ["account_id", "period", "spend", "impressions", "reach", "clicks", "link_clicks", "link_click_people", "landing_views", "conversations", "leads", "updated_at"],
             ["account_id", "period"],
-            monthly.map(p => [p.accountId, p.period, p.spend, p.impressions, p.reach, p.clicks, p.conversations, p.leads, now]),
+            monthly.map(p => [p.accountId, p.period, p.spend, p.impressions, p.reach, p.clicks, p.linkClicks, p.linkClickPeople, p.landingViews, p.conversations, p.leads, now]),
           );
         }
 
@@ -214,9 +219,9 @@ export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult
           if (regions.length) {
             await upsertChunks(
               "meta_region_daily",
-              ["account_id", "day", "region", "spend", "impressions", "reach", "clicks", "conversations", "updated_at"],
+              ["account_id", "day", "region", "spend", "impressions", "reach", "clicks", "link_clicks", "link_click_people", "landing_views", "conversations", "updated_at"],
               ["account_id", "day", "region"],
-              regions.map(r => [r.accountId, r.date, r.region, r.spend, r.impressions, r.reach, r.clicks, r.conversations, now]),
+              regions.map(r => [r.accountId, r.date, r.region, r.spend, r.impressions, r.reach, r.clicks, r.linkClicks, r.linkClickPeople, r.landingViews, r.conversations, now]),
             );
             regionRows += regions.length;
           }
@@ -343,51 +348,55 @@ export async function loadMeta(from: string, to: string): Promise<MetaData> {
   await ensureMetaDatabase();
   const db = getRawDb();
   const token = metaToken();
-  const [accounts, days, periods, regions, rates, dailyRates, projects, lastRun] = await Promise.all([
+  // The month on screen. Only its rows are sent: a year of raw daily and regional rows was almost a
+  // megabyte of JSON, and the page charts one month at a time — the rest of the year comes as `history`.
+  const month = metaMonth(to);
+  const shown = metaMonthRange(month);
+
+  const [raw, accounts, rates, projects, lastRun] = await Promise.all([
+    metaRaw(from, to),
     db.prepare(`SELECT a.*, d.first_date, d.last_date, d.days FROM meta_accounts a
       LEFT JOIN (SELECT account_id, min(day) AS first_date, max(day) AS last_date, count(*) AS days FROM meta_daily GROUP BY account_id) d
         ON d.account_id = a.id
       ORDER BY a.name`).all<AccountRow>(),
-    db.prepare("SELECT * FROM meta_daily WHERE day BETWEEN ? AND ? ORDER BY day").bind(from, to).all<DayRow>(),
-    db.prepare("SELECT * FROM meta_period WHERE period BETWEEN ? AND ?").bind(from.slice(0, 7), to.slice(0, 7))
-      .all<{ account_id: string; period: string; spend: string | number; impressions: number; reach: number; clicks: number; conversations: number; leads: number }>(),
-    db.prepare("SELECT * FROM meta_region_daily WHERE day BETWEEN ? AND ?").bind(from, to)
-      .all<{ account_id: string; day: string; region: string; spend: string | number; impressions: number; reach: number; clicks: number; conversations: number }>(),
     metaRates(),
-    fxDaily(from, to),
     projectList(),
     db.prepare("SELECT * FROM meta_sync_runs ORDER BY started_at DESC LIMIT 1")
       .all<{ id: string; started_at: string; finished_at: string | null; status: MetaSyncRun["status"]; accounts: number; days: number; range_from: string; range_to: string; message: string }>(),
   ]);
 
-  const run = lastRun.results[0];
   // Every month the window touches, oldest first.
   const months: string[] = [];
-  for (let m = metaMonth(from); m <= metaMonth(to); ) {
+  for (let m = metaMonth(from); m <= month; ) {
     months.push(m);
     const [y, mo] = m.split("-").map(Number);
     m = `${mo === 12 ? y! + 1 : y}-${String(mo === 12 ? 1 : mo! + 1).padStart(2, "0")}`;
   }
+  const history: Record<string, Record<string, MetaFacts>> = {};
+  for (const period of months) {
+    const range = metaMonthRange(period);
+    for (const [projectId, facts] of Object.entries(metaFactsFrom(raw, range.from, range.to))) {
+      (history[projectId] ??= {})[period] = facts;
+    }
+  }
+
+  // `metaRaw` already limits itself to tracked accounts, so only the month has to be narrowed here.
+  const inMonth = <T extends { date: string }>(rows: T[]) => rows.filter(r => r.date >= shown.from && r.date <= shown.to);
+  const run = lastRun.results[0];
   return {
     connected: Boolean(token),
     token: token
       ? { present: true, ...await cachedTokenInfo(token) }
       : { present: false, message: "META_ACCESS_TOKEN орнатылмаған." },
     accounts: accounts.results.map(mapAccount),
-    days: days.results.map(mapDay),
-    periods: periods.results.map(r => ({
-      accountId: r.account_id, period: r.period, spend: Number(r.spend), impressions: Number(r.impressions),
-      reach: Number(r.reach), clicks: Number(r.clicks), conversations: Number(r.conversations), leads: Number(r.leads),
-    })),
-    regions: regions.results.map(r => ({
-      accountId: r.account_id, date: r.day, region: r.region, spend: Number(r.spend), impressions: Number(r.impressions),
-      reach: Number(r.reach), clicks: Number(r.clicks), conversations: Number(r.conversations),
-    })),
+    days: inMonth(raw.days),
+    periods: raw.periods.filter(p => months.includes(p.period)),
+    regions: inMonth(raw.regions),
     rates,
-    dailyRates,
+    dailyRates: (await fxDaily(shown.from, shown.to)),
     regionRules: await regionRules(projects),
     projects,
-    history: await metaFactsByPeriod(from, to, months).catch(() => ({})),
+    history,
     months,
     lastSync: run
       ? { id: run.id, startedAt: run.started_at, finishedAt: run.finished_at, status: run.status, accounts: Number(run.accounts), days: Number(run.days), from: run.range_from, to: run.range_to, message: run.message }
@@ -421,9 +430,9 @@ async function metaRaw(from: string, to: string): Promise<MetaRaw> {
     db.prepare("SELECT id, project_id, split_mode FROM meta_accounts WHERE tracked=1").all<{ id: string; project_id: string | null; split_mode: MetaSplitMode }>(),
     db.prepare("SELECT * FROM meta_daily WHERE day BETWEEN ? AND ?").bind(from, to).all<DayRow>(),
     db.prepare("SELECT * FROM meta_period WHERE period BETWEEN ? AND ?").bind(from.slice(0, 7), to.slice(0, 7))
-      .all<{ account_id: string; period: string; spend: string | number; impressions: number; reach: number; clicks: number; conversations: number; leads: number }>(),
-    db.prepare("SELECT account_id, day, region, spend, impressions, reach, clicks, conversations FROM meta_region_daily WHERE day BETWEEN ? AND ?").bind(from, to)
-      .all<{ account_id: string; day: string; region: string; spend: string | number; impressions: number; reach: number; clicks: number; conversations: number }>(),
+      .all<{ account_id: string; period: string; spend: string | number; impressions: number; reach: number; clicks: number; link_clicks: number; link_click_people: number; landing_views: number; conversations: number; leads: number }>(),
+    db.prepare("SELECT account_id, day, region, spend, impressions, reach, clicks, link_clicks, link_click_people, landing_views, conversations FROM meta_region_daily WHERE day BETWEEN ? AND ?").bind(from, to)
+      .all<{ account_id: string; day: string; region: string; spend: string | number; impressions: number; reach: number; clicks: number; link_clicks: number; link_click_people: number; landing_views: number; conversations: number }>(),
     metaRates(),
     fxDaily(from, to),
     regionRules(),
@@ -433,11 +442,15 @@ async function metaRaw(from: string, to: string): Promise<MetaRaw> {
     days: days.results.map(mapDay),
     periods: periods.results.map(r => ({
       accountId: r.account_id, period: r.period, spend: Number(r.spend), impressions: Number(r.impressions),
-      reach: Number(r.reach), clicks: Number(r.clicks), conversations: Number(r.conversations), leads: Number(r.leads),
+      reach: Number(r.reach), clicks: Number(r.clicks), linkClicks: Number(r.link_clicks ?? 0),
+      linkClickPeople: Number(r.link_click_people ?? 0), landingViews: Number(r.landing_views ?? 0),
+      conversations: Number(r.conversations), leads: Number(r.leads),
     })),
     regions: regionRows.results.map(r => ({
       accountId: r.account_id, date: r.day, region: r.region, spend: Number(r.spend),
-      impressions: Number(r.impressions), reach: Number(r.reach), clicks: Number(r.clicks), conversations: Number(r.conversations),
+      impressions: Number(r.impressions), reach: Number(r.reach), clicks: Number(r.clicks),
+      linkClicks: Number(r.link_clicks ?? 0), linkClickPeople: Number(r.link_click_people ?? 0),
+      landingViews: Number(r.landing_views ?? 0), conversations: Number(r.conversations),
     })),
     rateOf: rateLookup(daily, monthly),
     rules,
@@ -488,11 +501,17 @@ function metaFactsFrom(raw: MetaRaw, from: string, to: string): Record<string, M
       const projectId = ruleFor.get(row.region) ?? null;
       if (!projectId) continue;
       const byDay = perProject.get(projectId) ?? new Map<string, MetaDay>();
-      const day = byDay.get(row.date) ?? { accountId, date: row.date, spend: 0, impressions: 0, reach: 0, clicks: 0, conversations: 0, leads: 0 };
+      const day = byDay.get(row.date) ?? {
+        accountId, date: row.date, spend: 0, impressions: 0, reach: 0, clicks: 0,
+        linkClicks: 0, linkClickPeople: 0, landingViews: 0, conversations: 0, leads: 0,
+      };
       day.spend += row.spend;
       day.impressions += row.impressions;
       day.reach += row.reach;
       day.clicks += row.clicks;
+      day.linkClicks += row.linkClicks;
+      day.linkClickPeople += row.linkClickPeople;
+      day.landingViews += row.landingViews;
       day.conversations += row.conversations;
       byDay.set(row.date, day);
       perProject.set(projectId, byDay);

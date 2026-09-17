@@ -140,9 +140,11 @@ export function useFinance() {
     }));
   });
   const summaries = computed<Record<string, FinanceSummary>>(() => Object.fromEntries(
-    projects.value.map(p => [p.id, summarizeFinance(entriesOf(p.id), metricsOf(p.id), bankFactsOf(p.id))]),
+    projects.value.map(p => [p.id, summarizeFinance(entriesOf(p.id), metricsOf(p.id), bankFactsOf(p.id), metaFactsOf(p.id))]),
   ));
-  const total = computed(() => consolidateFinance(projects.value.map(p => ({ entries: entriesOf(p.id), metrics: metricsOf(p.id), bank: bankFactsOf(p.id) }))));
+  const total = computed(() => consolidateFinance(projects.value.map(p => ({
+    entries: entriesOf(p.id), metrics: metricsOf(p.id), bank: bankFactsOf(p.id), ads: metaFactsOf(p.id),
+  }))));
   const closed = computed(() => period.value < currentPeriod());
   const issues = computed<Record<string, FinanceIssue[]>>(() => Object.fromEntries(projects.value.map(p => [
     p.id,

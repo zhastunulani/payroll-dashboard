@@ -23,17 +23,20 @@ const ACC = fixture.accountId;
 const days = fixture.daily.map(r => toMetaDay(ACC, r)!);
 const periods = fixture.monthly.map(r => toMetaPeriod(ACC, r)!);
 
-test("an insights row becomes a day, with only the two actions the funnel uses", () => {
+test("an insights row becomes a day, keeping only the metrics the funnel uses", () => {
   const row: MetaInsightRow = {
-    date_start: "2026-08-03", date_stop: "2026-08-03", spend: "225.41", impressions: "43011", reach: "29811", clicks: "693",
+    date_start: "2026-08-03", date_stop: "2026-08-03", spend: "225.41", impressions: "43011", reach: "29811",
+    clicks: "693", inline_link_clicks: "455", unique_inline_link_clicks: "372",
     actions: [
       { action_type: "onsite_conversion.post_save", value: "120" },
+      { action_type: "landing_page_view", value: "190" },
       { action_type: "onsite_conversion.messaging_conversation_started_7d", value: "135" },
       { action_type: "lead", value: "2" },
     ],
   };
   assert.deepEqual(toMetaDay(ACC, row), {
-    accountId: ACC, date: "2026-08-03", spend: 225.41, impressions: 43011, reach: 29811, clicks: 693, conversations: 135, leads: 2,
+    accountId: ACC, date: "2026-08-03", spend: 225.41, impressions: 43011, reach: 29811, clicks: 693,
+    linkClicks: 455, linkClickPeople: 372, landingViews: 190, conversations: 135, leads: 2,
   });
   assert.equal(conversationsOf(row.actions), 135);
   assert.equal(leadsOf(row.actions), 2);
@@ -41,6 +44,8 @@ test("an insights row becomes a day, with only the two actions the funnel uses",
   assert.equal(toMetaDay(ACC, { spend: "1" }), null);
   // Saves, likes and comments are engagement, not leads.
   assert.equal(leadsOf([{ action_type: "onsite_conversion.post_save", value: "9" }]), 0);
+  // Meta sometimes serves the link click only as an action; that form is read too.
+  assert.equal(toMetaDay(ACC, { date_start: "2026-08-03", actions: [{ action_type: "link_click", value: "40" }] })!.linkClicks, 40);
 });
 
 test("a whole month: spend adds up across days, reach does not", () => {
@@ -91,7 +96,8 @@ test("cost metrics come from the window's own totals", () => {
   const facts = metaFacts(days, periods)!;
   assert.equal(facts.cpm, Math.round((facts.spend / facts.impressions) * 1000 * 100) / 100);
   assert.equal(facts.cpc, facts.spend / facts.clicks);
-  assert.equal(facts.ctr, facts.clicks / facts.impressions);
+  // CTR counts the link click, not a like or a comment.
+  assert.equal(facts.ctr, facts.linkClicks / facts.impressions);
   assert.equal(facts.costPerConversation, facts.spend / facts.conversations);
   assert.equal(metaFacts([]), null);
 });
@@ -238,4 +244,46 @@ test("a month of real days converts to tenge at each day's own rate", () => {
   assert.deepEqual(gapped.missingRateDays, ["2026-08-15"]);
   // The dollar figure is unaffected: only the conversion is unknown.
   assert.equal(gapped.spend, facts.spend);
+});
+
+test("the traffic steps: clicks add up, the people behind them do not", () => {
+  const facts = metaFacts(days, periods)!;
+  const month = periods[0]!;
+  // Link clicks are events, so the daily rows reconcile to the month.
+  assert.equal(facts.linkClicks, month.linkClicks);
+  assert.equal(facts.linkClicks, days.reduce((a, d) => a + d.linkClicks, 0));
+  assert.equal(facts.landingViews, days.reduce((a, d) => a + d.landingViews, 0));
+  // Unique clickers count people: the month's figure is far below the sum of its days.
+  assert.equal(facts.linkClickPeople, month.linkClickPeople);
+  assert.equal(facts.linkClickPeopleDays, days.reduce((a, d) => a + d.linkClickPeople, 0));
+  assert.ok(facts.linkClickPeopleDays > facts.linkClickPeople! * 2);
+  // Fewer people arrive than click, which is the whole point of tracking both.
+  assert.ok(facts.landingViews < facts.linkClicks);
+
+  // CTR is the link click, not every click: a like is not a visit.
+  assert.equal(facts.ctr, facts.linkClicks / facts.impressions);
+  assert.ok(facts.clicks > facts.linkClicks);
+  assert.equal(facts.landingRate, facts.landingViews / facts.linkClicks);
+  assert.equal(facts.costPerLinkClick, facts.spend / facts.linkClicks);
+  assert.equal(facts.costPerLandingView, facts.spend / facts.landingViews);
+});
+
+test("a part-month window gives no people count for link clicks either", () => {
+  const week = days.filter(d => d.date <= "2026-08-07");
+  const facts = metaFacts(week, periods)!;
+  assert.equal(facts.linkClickPeople, null);
+  assert.ok(facts.linkClickPeopleDays > 0);
+  // The event counts stay exact for any window.
+  assert.equal(facts.linkClicks, week.reduce((a, d) => a + d.linkClicks, 0));
+});
+
+test("pooling projects adds the events and drops the people", () => {
+  const half = Math.ceil(days.length / 2);
+  const a = metaFacts(days.slice(0, half), periods)!;
+  const b = metaFacts(days.slice(half), periods)!;
+  const total = consolidateMetaFacts([a, b])!;
+  assert.equal(total.linkClicks, a.linkClicks + b.linkClicks);
+  assert.equal(total.landingViews, a.landingViews + b.landingViews);
+  assert.equal(total.linkClickPeople, null);
+  assert.equal(total.linkClickPeopleDays, a.linkClickPeopleDays + b.linkClickPeopleDays);
 });

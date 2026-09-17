@@ -125,10 +125,24 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   `meta_sync_runs`; one failing account never loses the others.
 - **The panel also reconciles.** It prints what the ledger holds for the month next to the cabinet's own
   figure and the difference, because a hand-entered target row often covers only part of the month.
+- **The traffic funnel.** `clicks` counts every click, likes and comments included, so it is not a
+  traffic number: the panel uses `inline_link_clicks` (the link itself), `unique_inline_link_clicks`
+  (how many *people* followed it) and the `landing_page_view` action (how many actually arrived).
+  Unique clickers count people, so they follow the reach rule — exact only for a period Meta itself
+  aggregated, otherwise reported as a day-sum upper bound. The funnel shows көрсетілім → ссылка басқан →
+  сайтқа кірген → хат жазысу with each step's cost in ₸ and the share that survived the step before.
+  For messaging campaigns landing views are near zero by design, and the panel says so rather than
+  showing an alarming gap.
+- **Leads.** Meta's own `lead` action is empty here — the campaigns are messaging ones, so the first
+  contact is a started conversation. The hand-entered lead count comes from the CRM and is the owner's
+  own definition, so it keeps priority; the cabinet's conversations stand in only when nothing was
+  entered, and `funnel.leadsSource` says which of the two is on screen. CPL and CAC follow.
 - **The panel** (`MetaTargetPanel.vue`, on «Юнит және таргет») leads with ₸ and shows the dollar figure
-  underneath, then the month per project, the month-by-month history for a year, the daily bars, and the
-  regional table with the project each region is assigned to. Everything it shows comes from the same
-  server-side attribution the reports use, so the two can never disagree.
+  underneath, then the funnel, the month per project, the month-by-month history for a year, the daily
+  bars, and the regional table with the project each region is assigned to. Everything it shows comes
+  from the same server-side attribution the reports use, so the two can never disagree. `GET /api/meta`
+  returns only the selected month's daily and regional rows — a year of raw rows was nearly a megabyte
+  of JSON — with the rest of the year arriving pre-aggregated as `history`.
 - **Storage:** `meta_accounts` (name, currency, project, tracked, split_mode), `meta_daily`, `meta_period`
   (Meta's own monthly aggregate — the only source of a deduplicated reach), `meta_region_daily`,
   `meta_region_rules`, `meta_fx_rates`, `fx_daily`, `meta_sync_runs` (`lib/meta-schema.ts`).

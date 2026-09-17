@@ -9,11 +9,17 @@
    "impressions": "73812",
    "reach": "46405",
    "clicks": "1292",
+   "inline_link_clicks": "834",
+   "unique_inline_link_clicks": "694",
    "frequency": "1.590604",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "367"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "214"
+     "value": "276"
     },
     {
      "action_type": "lead",
@@ -24,15 +30,46 @@
   {
    "date_start": "2026-08-02",
    "date_stop": "2026-08-02",
-   "spend": "274.91",
-   "impressions": "61962",
-   "reach": "45310",
-   "clicks": "1220",
-   "frequency": "1.367513",
+   "spend": "342.14",
+   "impressions": "64398",
+   "reach": "44221",
+   "clicks": "1038",
+   "inline_link_clicks": "658",
+   "unique_inline_link_clicks": "551",
+   "frequency": "1.456276",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "307"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "200"
+     "value": "172"
+    },
+    {
+     "action_type": "lead",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-03",
+   "date_stop": "2026-08-03",
+   "spend": "249.31",
+   "impressions": "55680",
+   "reach": "39287",
+   "clicks": "955",
+   "inline_link_clicks": "642",
+   "unique_inline_link_clicks": "505",
+   "frequency": "1.417263",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "286"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "208"
     },
     {
      "action_type": "lead",
@@ -41,52 +78,120 @@
    ]
   },
   {
-   "date_start": "2026-08-03",
-   "date_stop": "2026-08-03",
-   "spend": "252.95",
-   "impressions": "45648",
-   "reach": "33498",
-   "clicks": "930",
-   "frequency": "1.362708",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "154"
-    },
-    {
-     "action_type": "lead",
-     "value": "0"
-    }
-   ]
-  },
-  {
    "date_start": "2026-08-04",
    "date_stop": "2026-08-04",
-   "spend": "249.31",
-   "impressions": "55680",
-   "reach": "39287",
-   "clicks": "955",
-   "frequency": "1.417263",
+   "spend": "170.99",
+   "impressions": "36607",
+   "reach": "24161",
+   "clicks": "775",
+   "inline_link_clicks": "528",
+   "unique_inline_link_clicks": "419",
+   "frequency": "1.515128",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "222"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "183"
+     "value": "117"
     },
     {
      "action_type": "lead",
-     "value": "0"
+     "value": "1"
     }
    ]
   },
   {
    "date_start": "2026-08-05",
    "date_stop": "2026-08-05",
-   "spend": "289.90",
-   "impressions": "66151",
-   "reach": "44888",
-   "clicks": "849",
-   "frequency": "1.473690",
+   "spend": "169.70",
+   "impressions": "32792",
+   "reach": "21713",
+   "clicks": "705",
+   "inline_link_clicks": "471",
+   "unique_inline_link_clicks": "379",
+   "frequency": "1.510247",
    "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "218"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "140"
+    },
+    {
+     "action_type": "lead",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-06",
+   "date_stop": "2026-08-06",
+   "spend": "275.40",
+   "impressions": "55483",
+   "reach": "40237",
+   "clicks": "785",
+   "inline_link_clicks": "490",
+   "unique_inline_link_clicks": "383",
+   "frequency": "1.378905",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "198"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "116"
+    },
+    {
+     "action_type": "lead",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-07",
+   "date_stop": "2026-08-07",
+   "spend": "307.50",
+   "impressions": "53323",
+   "reach": "37869",
+   "clicks": "1118",
+   "inline_link_clicks": "774",
+   "unique_inline_link_clicks": "638",
+   "frequency": "1.408091",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "311"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "201"
+    },
+    {
+     "action_type": "lead",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-08",
+   "date_stop": "2026-08-08",
+   "spend": "344.44",
+   "impressions": "71761",
+   "reach": "45364",
+   "clicks": "895",
+   "inline_link_clicks": "623",
+   "unique_inline_link_clicks": "494",
+   "frequency": "1.581893",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "258"
+    },
     {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
      "value": "169"
@@ -98,93 +203,48 @@
    ]
   },
   {
-   "date_start": "2026-08-06",
-   "date_stop": "2026-08-06",
-   "spend": "379.29",
-   "impressions": "81898",
-   "reach": "52909",
-   "clicks": "1201",
-   "frequency": "1.547903",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "181"
-    },
-    {
-     "action_type": "lead",
-     "value": "1"
-    }
-   ]
-  },
-  {
-   "date_start": "2026-08-07",
-   "date_stop": "2026-08-07",
-   "spend": "169.70",
-   "impressions": "32792",
-   "reach": "21713",
-   "clicks": "705",
-   "frequency": "1.510247",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "132"
-    },
-    {
-     "action_type": "lead",
-     "value": "1"
-    }
-   ]
-  },
-  {
-   "date_start": "2026-08-08",
-   "date_stop": "2026-08-08",
-   "spend": "344.63",
-   "impressions": "73565",
-   "reach": "50673",
-   "clicks": "1252",
-   "frequency": "1.451759",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "228"
-    },
-    {
-     "action_type": "lead",
-     "value": "2"
-    }
-   ]
-  },
-  {
    "date_start": "2026-08-09",
    "date_stop": "2026-08-09",
-   "spend": "203.77",
-   "impressions": "35292",
-   "reach": "21991",
-   "clicks": "438",
-   "frequency": "1.604838",
+   "spend": "277.72",
+   "impressions": "62189",
+   "reach": "44041",
+   "clicks": "1189",
+   "inline_link_clicks": "825",
+   "unique_inline_link_clicks": "645",
+   "frequency": "1.412071",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "382"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "65"
+     "value": "186"
     },
     {
      "action_type": "lead",
-     "value": "2"
+     "value": "0"
     }
    ]
   },
   {
    "date_start": "2026-08-10",
    "date_stop": "2026-08-10",
-   "spend": "307.50",
-   "impressions": "53323",
-   "reach": "37869",
-   "clicks": "1118",
-   "frequency": "1.408091",
+   "spend": "331.15",
+   "impressions": "57348",
+   "reach": "39248",
+   "clicks": "864",
+   "inline_link_clicks": "590",
+   "unique_inline_link_clicks": "484",
+   "frequency": "1.461170",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "241"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "237"
+     "value": "144"
     },
     {
      "action_type": "lead",
@@ -195,34 +255,46 @@
   {
    "date_start": "2026-08-11",
    "date_stop": "2026-08-11",
-   "spend": "154.24",
-   "impressions": "30812",
-   "reach": "21956",
-   "clicks": "609",
-   "frequency": "1.403352",
+   "spend": "281.37",
+   "impressions": "61080",
+   "reach": "44858",
+   "clicks": "1203",
+   "inline_link_clicks": "786",
+   "unique_inline_link_clicks": "641",
+   "frequency": "1.361630",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "370"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "116"
+     "value": "180"
     },
     {
      "action_type": "lead",
-     "value": "0"
+     "value": "2"
     }
    ]
   },
   {
    "date_start": "2026-08-12",
    "date_stop": "2026-08-12",
-   "spend": "161.69",
-   "impressions": "36768",
-   "reach": "23804",
-   "clicks": "509",
-   "frequency": "1.544614",
+   "spend": "354.95",
+   "impressions": "75179",
+   "reach": "55181",
+   "clicks": "974",
+   "inline_link_clicks": "609",
+   "unique_inline_link_clicks": "478",
+   "frequency": "1.362407",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "269"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "96"
+     "value": "199"
     },
     {
      "action_type": "lead",
@@ -233,34 +305,21 @@
   {
    "date_start": "2026-08-13",
    "date_stop": "2026-08-13",
-   "spend": "277.72",
-   "impressions": "62189",
-   "reach": "44041",
-   "clicks": "1189",
-   "frequency": "1.412071",
+   "spend": "321.18",
+   "impressions": "68442",
+   "reach": "44566",
+   "clicks": "1166",
+   "inline_link_clicks": "751",
+   "unique_inline_link_clicks": "609",
+   "frequency": "1.535745",
    "actions": [
     {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "254"
+     "action_type": "landing_page_view",
+     "value": "359"
     },
     {
-     "action_type": "lead",
-     "value": "0"
-    }
-   ]
-  },
-  {
-   "date_start": "2026-08-14",
-   "date_stop": "2026-08-14",
-   "spend": "346.11",
-   "impressions": "63011",
-   "reach": "39264",
-   "clicks": "1213",
-   "frequency": "1.604803",
-   "actions": [
-    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "175"
+     "value": "221"
     },
     {
      "action_type": "lead",
@@ -269,17 +328,48 @@
    ]
   },
   {
-   "date_start": "2026-08-15",
-   "date_stop": "2026-08-15",
-   "spend": "226.50",
-   "impressions": "49272",
-   "reach": "34523",
-   "clicks": "644",
-   "frequency": "1.427222",
+   "date_start": "2026-08-14",
+   "date_stop": "2026-08-14",
+   "spend": "348.72",
+   "impressions": "78239",
+   "reach": "56941",
+   "clicks": "998",
+   "inline_link_clicks": "654",
+   "unique_inline_link_clicks": "535",
+   "frequency": "1.374036",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "262"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "107"
+     "value": "189"
+    },
+    {
+     "action_type": "lead",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-15",
+   "date_stop": "2026-08-15",
+   "spend": "202.13",
+   "impressions": "34486",
+   "reach": "24045",
+   "clicks": "572",
+   "inline_link_clicks": "387",
+   "unique_inline_link_clicks": "304",
+   "frequency": "1.434227",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "174"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "97"
     },
     {
      "action_type": "lead",
@@ -290,15 +380,21 @@
   {
    "date_start": "2026-08-16",
    "date_stop": "2026-08-16",
-   "spend": "281.37",
-   "impressions": "61080",
-   "reach": "44858",
-   "clicks": "1203",
-   "frequency": "1.361630",
+   "spend": "380.17",
+   "impressions": "82894",
+   "reach": "59248",
+   "clicks": "1813",
+   "inline_link_clicks": "1216",
+   "unique_inline_link_clicks": "1021",
+   "frequency": "1.399102",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "546"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "209"
+     "value": "353"
     },
     {
      "action_type": "lead",
@@ -309,34 +405,46 @@
   {
    "date_start": "2026-08-17",
    "date_stop": "2026-08-17",
-   "spend": "369.66",
-   "impressions": "65474",
-   "reach": "47651",
-   "clicks": "1322",
-   "frequency": "1.374032",
+   "spend": "244.50",
+   "impressions": "55587",
+   "reach": "37904",
+   "clicks": "1076",
+   "inline_link_clicks": "712",
+   "unique_inline_link_clicks": "571",
+   "frequency": "1.466521",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "327"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "259"
+     "value": "219"
     },
     {
      "action_type": "lead",
-     "value": "2"
+     "value": "1"
     }
    ]
   },
   {
    "date_start": "2026-08-18",
    "date_stop": "2026-08-18",
-   "spend": "173.88",
-   "impressions": "30265",
-   "reach": "19071",
-   "clicks": "522",
-   "frequency": "1.586965",
+   "spend": "209.48",
+   "impressions": "40746",
+   "reach": "25855",
+   "clicks": "866",
+   "inline_link_clicks": "555",
+   "unique_inline_link_clicks": "435",
+   "frequency": "1.575943",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "256"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "106"
+     "value": "182"
     },
     {
      "action_type": "lead",
@@ -347,15 +455,21 @@
   {
    "date_start": "2026-08-19",
    "date_stop": "2026-08-19",
-   "spend": "321.18",
-   "impressions": "68442",
-   "reach": "44566",
-   "clicks": "1166",
-   "frequency": "1.535745",
+   "spend": "288.33",
+   "impressions": "63423",
+   "reach": "45071",
+   "clicks": "912",
+   "inline_link_clicks": "617",
+   "unique_inline_link_clicks": "503",
+   "frequency": "1.407180",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "273"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "192"
+     "value": "150"
     },
     {
      "action_type": "lead",
@@ -366,53 +480,96 @@
   {
    "date_start": "2026-08-20",
    "date_stop": "2026-08-20",
-   "spend": "395.54",
-   "impressions": "82058",
-   "reach": "55042",
-   "clicks": "1637",
-   "frequency": "1.490825",
+   "spend": "285.25",
+   "impressions": "63486",
+   "reach": "41212",
+   "clicks": "1276",
+   "inline_link_clicks": "870",
+   "unique_inline_link_clicks": "727",
+   "frequency": "1.540474",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "394"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "348"
+     "value": "181"
     },
     {
      "action_type": "lead",
-     "value": "2"
+     "value": "1"
     }
    ]
   },
   {
    "date_start": "2026-08-21",
    "date_stop": "2026-08-21",
-   "spend": "168.97",
-   "impressions": "33207",
-   "reach": "23069",
-   "clicks": "399",
-   "frequency": "1.439464",
+   "spend": "236.40",
+   "impressions": "48610",
+   "reach": "30188",
+   "clicks": "1027",
+   "inline_link_clicks": "695",
+   "unique_inline_link_clicks": "559",
+   "frequency": "1.610242",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "285"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "76"
+     "value": "188"
     },
     {
      "action_type": "lead",
-     "value": "2"
+     "value": "1"
     }
    ]
   },
   {
    "date_start": "2026-08-22",
    "date_stop": "2026-08-22",
-   "spend": "202.13",
-   "impressions": "34486",
-   "reach": "24045",
-   "clicks": "572",
-   "frequency": "1.434227",
+   "spend": "397.71",
+   "impressions": "87383",
+   "reach": "55247",
+   "clicks": "1414",
+   "inline_link_clicks": "981",
+   "unique_inline_link_clicks": "803",
+   "frequency": "1.581679",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "399"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "112"
+     "value": "206"
+    },
+    {
+     "action_type": "lead",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-23",
+   "date_stop": "2026-08-23",
+   "spend": "175.19",
+   "impressions": "35757",
+   "reach": "23955",
+   "clicks": "716",
+   "inline_link_clicks": "463",
+   "unique_inline_link_clicks": "382",
+   "frequency": "1.492674",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "186"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "109"
     },
     {
      "action_type": "lead",
@@ -421,36 +578,23 @@
    ]
   },
   {
-   "date_start": "2026-08-23",
-   "date_stop": "2026-08-23",
-   "spend": "308.06",
-   "impressions": "59351",
-   "reach": "39845",
-   "clicks": "1259",
-   "frequency": "1.489547",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "257"
-    },
-    {
-     "action_type": "lead",
-     "value": "2"
-    }
-   ]
-  },
-  {
    "date_start": "2026-08-24",
    "date_stop": "2026-08-24",
-   "spend": "396.66",
-   "impressions": "82587",
-   "reach": "61041",
-   "clicks": "1494",
-   "frequency": "1.352976",
+   "spend": "267.23",
+   "impressions": "47599",
+   "reach": "31579",
+   "clicks": "721",
+   "inline_link_clicks": "455",
+   "unique_inline_link_clicks": "367",
+   "frequency": "1.507299",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "206"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "291"
+     "value": "140"
     },
     {
      "action_type": "lead",
@@ -461,34 +605,46 @@
   {
    "date_start": "2026-08-25",
    "date_stop": "2026-08-25",
-   "spend": "244.50",
-   "impressions": "55587",
-   "reach": "37904",
-   "clicks": "1076",
-   "frequency": "1.466521",
+   "spend": "184.88",
+   "impressions": "31501",
+   "reach": "23161",
+   "clicks": "656",
+   "inline_link_clicks": "421",
+   "unique_inline_link_clicks": "341",
+   "frequency": "1.360088",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "173"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "196"
+     "value": "94"
     },
     {
      "action_type": "lead",
-     "value": "1"
+     "value": "0"
     }
    ]
   },
   {
    "date_start": "2026-08-26",
    "date_stop": "2026-08-26",
-   "spend": "334.97",
-   "impressions": "72876",
-   "reach": "49716",
-   "clicks": "1048",
-   "frequency": "1.465846",
+   "spend": "295.12",
+   "impressions": "50775",
+   "reach": "35571",
+   "clicks": "867",
+   "inline_link_clicks": "600",
+   "unique_inline_link_clicks": "475",
+   "frequency": "1.427427",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "260"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "181"
+     "value": "153"
     },
     {
      "action_type": "lead",
@@ -499,53 +655,21 @@
   {
    "date_start": "2026-08-27",
    "date_stop": "2026-08-27",
-   "spend": "381.53",
-   "impressions": "70770",
-   "reach": "44294",
-   "clicks": "1392",
-   "frequency": "1.597733",
+   "spend": "300.43",
+   "impressions": "58274",
+   "reach": "38136",
+   "clicks": "1160",
+   "inline_link_clicks": "792",
+   "unique_inline_link_clicks": "627",
+   "frequency": "1.528057",
    "actions": [
     {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "293"
+     "action_type": "landing_page_view",
+     "value": "377"
     },
     {
-     "action_type": "lead",
-     "value": "1"
-    }
-   ]
-  },
-  {
-   "date_start": "2026-08-28",
-   "date_stop": "2026-08-28",
-   "spend": "288.33",
-   "impressions": "63423",
-   "reach": "45071",
-   "clicks": "912",
-   "frequency": "1.407180",
-   "actions": [
-    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "179"
-    },
-    {
-     "action_type": "lead",
-     "value": "1"
-    }
-   ]
-  },
-  {
-   "date_start": "2026-08-29",
-   "date_stop": "2026-08-29",
-   "spend": "280.48",
-   "impressions": "52773",
-   "reach": "34387",
-   "clicks": "919",
-   "frequency": "1.534679",
-   "actions": [
-    {
-     "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "193"
+     "value": "205"
     },
     {
      "action_type": "lead",
@@ -554,17 +678,48 @@
    ]
   },
   {
-   "date_start": "2026-08-30",
-   "date_stop": "2026-08-30",
-   "spend": "352.66",
-   "impressions": "76217",
-   "reach": "55654",
-   "clicks": "1420",
-   "frequency": "1.369479",
+   "date_start": "2026-08-28",
+   "date_stop": "2026-08-28",
+   "spend": "195.98",
+   "impressions": "35944",
+   "reach": "25832",
+   "clicks": "515",
+   "inline_link_clicks": "326",
+   "unique_inline_link_clicks": "271",
+   "frequency": "1.391452",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "141"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "201"
+     "value": "90"
+    },
+    {
+     "action_type": "lead",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-29",
+   "date_stop": "2026-08-29",
+   "spend": "173.62",
+   "impressions": "38720",
+   "reach": "28096",
+   "clicks": "686",
+   "inline_link_clicks": "462",
+   "unique_inline_link_clicks": "378",
+   "frequency": "1.378132",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "218"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "98"
     },
     {
      "action_type": "lead",
@@ -573,17 +728,48 @@
    ]
   },
   {
-   "date_start": "2026-08-31",
-   "date_stop": "2026-08-31",
-   "spend": "236.40",
-   "impressions": "48610",
-   "reach": "30188",
-   "clicks": "1027",
-   "frequency": "1.610242",
+   "date_start": "2026-08-30",
+   "date_stop": "2026-08-30",
+   "spend": "197.31",
+   "impressions": "35512",
+   "reach": "23829",
+   "clicks": "726",
+   "inline_link_clicks": "451",
+   "unique_inline_link_clicks": "366",
+   "frequency": "1.490285",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "185"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "202"
+     "value": "140"
+    },
+    {
+     "action_type": "lead",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "date_start": "2026-08-31",
+   "date_stop": "2026-08-31",
+   "spend": "271.27",
+   "impressions": "52754",
+   "reach": "35346",
+   "clicks": "823",
+   "inline_link_clicks": "531",
+   "unique_inline_link_clicks": "419",
+   "frequency": "1.492503",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "221"
+    },
+    {
+     "action_type": "onsite_conversion.messaging_conversation_started_7d",
+     "value": "156"
     },
     {
      "action_type": "lead",
@@ -596,19 +782,25 @@
   {
    "date_start": "2026-08-01",
    "date_stop": "2026-08-31",
-   "spend": "8755.05",
-   "impressions": "1779381",
-   "reach": "473668",
-   "clicks": "31492",
-   "frequency": "3.756600",
+   "spend": "8460.08",
+   "impressions": "1709784",
+   "reach": "455663",
+   "clicks": "29783",
+   "inline_link_clicks": "19769",
+   "unique_inline_link_clicks": "6562",
+   "frequency": "3.752299",
    "actions": [
     {
+     "action_type": "landing_page_view",
+     "value": "8671"
+    },
+    {
      "action_type": "onsite_conversion.messaging_conversation_started_7d",
-     "value": "5806"
+     "value": "5279"
     },
     {
      "action_type": "lead",
-     "value": "31"
+     "value": "30"
     }
    ]
   }
@@ -618,151 +810,256 @@
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "South Kazakhstan Region",
-   "spend": "16.408965",
-   "impressions": "2790",
-   "reach": "1869",
-   "clicks": "40",
-   "actions": []
+   "spend": "16.8129",
+   "impressions": "2858",
+   "reach": "1915",
+   "clicks": "41",
+   "inline_link_clicks": "27",
+   "unique_inline_link_clicks": "21",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "11"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Almaty Region",
-   "spend": "36.703376",
-   "impressions": "6240",
-   "reach": "4181",
-   "clicks": "90",
-   "actions": []
+   "spend": "17.312845",
+   "impressions": "2943",
+   "reach": "1972",
+   "clicks": "43",
+   "inline_link_clicks": "28",
+   "unique_inline_link_clicks": "22",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "12"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Akmola Region",
-   "spend": "39.840188",
-   "impressions": "6773",
-   "reach": "4538",
-   "clicks": "98",
-   "actions": []
+   "spend": "22.209662",
+   "impressions": "3776",
+   "reach": "2530",
+   "clicks": "55",
+   "inline_link_clicks": "36",
+   "unique_inline_link_clicks": "29",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "15"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Kyzylorda Region",
-   "spend": "59.3048",
-   "impressions": "10082",
-   "reach": "6755",
-   "clicks": "146",
-   "actions": []
+   "spend": "44.275013",
+   "impressions": "7527",
+   "reach": "5043",
+   "clicks": "109",
+   "inline_link_clicks": "72",
+   "unique_inline_link_clicks": "57",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "29"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Mangystau Region",
-   "spend": "51.225468",
-   "impressions": "8708",
-   "reach": "5834",
-   "clicks": "126",
-   "actions": []
+   "spend": "17.907112",
+   "impressions": "3044",
+   "reach": "2039",
+   "clicks": "44",
+   "inline_link_clicks": "29",
+   "unique_inline_link_clicks": "23",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "12"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Jambyl Region",
-   "spend": "15.040618",
-   "impressions": "2557",
-   "reach": "1713",
-   "clicks": "37",
-   "actions": []
+   "spend": "13.49845",
+   "impressions": "2295",
+   "reach": "1538",
+   "clicks": "33",
+   "inline_link_clicks": "22",
+   "unique_inline_link_clicks": "17",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "9"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Aktobe Region",
-   "spend": "30.772735",
-   "impressions": "5231",
-   "reach": "3505",
-   "clicks": "76",
-   "actions": []
+   "spend": "17.893227",
+   "impressions": "3042",
+   "reach": "2038",
+   "clicks": "44",
+   "inline_link_clicks": "29",
+   "unique_inline_link_clicks": "23",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "12"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "East Kazakhstan Region",
-   "spend": "56.021952",
-   "impressions": "9524",
-   "reach": "6381",
-   "clicks": "138",
-   "actions": []
+   "spend": "23.424107",
+   "impressions": "3982",
+   "reach": "2668",
+   "clicks": "58",
+   "inline_link_clicks": "38",
+   "unique_inline_link_clicks": "30",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "16"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Atyrau Region",
-   "spend": "42.191444",
-   "impressions": "7173",
-   "reach": "4806",
-   "clicks": "104",
-   "actions": []
+   "spend": "57.253482",
+   "impressions": "9733",
+   "reach": "6521",
+   "clicks": "141",
+   "inline_link_clicks": "93",
+   "unique_inline_link_clicks": "73",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "38"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Karaganda Region",
-   "spend": "13.891554",
-   "impressions": "2362",
-   "reach": "1583",
-   "clicks": "34",
-   "actions": []
+   "spend": "50.861855",
+   "impressions": "8647",
+   "reach": "5793",
+   "clicks": "125",
+   "inline_link_clicks": "83",
+   "unique_inline_link_clicks": "65",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "34"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "West Kazakhstan Region",
-   "spend": "13.702789",
-   "impressions": "2329",
-   "reach": "1560",
-   "clicks": "34",
-   "actions": []
+   "spend": "9.585122",
+   "impressions": "1629",
+   "reach": "1091",
+   "clicks": "24",
+   "inline_link_clicks": "16",
+   "unique_inline_link_clicks": "12",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "6"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Pavlodar Region",
-   "spend": "31.152586",
-   "impressions": "5296",
-   "reach": "3548",
-   "clicks": "77",
-   "actions": []
+   "spend": "52.483591",
+   "impressions": "8922",
+   "reach": "5978",
+   "clicks": "129",
+   "inline_link_clicks": "85",
+   "unique_inline_link_clicks": "67",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "35"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Kostanay Region",
-   "spend": "14.977524",
-   "impressions": "2546",
-   "reach": "1706",
-   "clicks": "37",
-   "actions": []
+   "spend": "51.867427",
+   "impressions": "8817",
+   "reach": "5907",
+   "clicks": "128",
+   "inline_link_clicks": "84",
+   "unique_inline_link_clicks": "67",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "35"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "North Kazakhstan Region",
-   "spend": "38.265478",
-   "impressions": "6505",
-   "reach": "4358",
+   "spend": "38.270923",
+   "impressions": "6506",
+   "reach": "4359",
    "clicks": "94",
-   "actions": []
+   "inline_link_clicks": "62",
+   "unique_inline_link_clicks": "49",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "25"
+    }
+   ]
   },
   {
    "date_start": "2026-09-14",
    "date_stop": "2026-09-14",
    "region": "Unknown",
-   "spend": "30.680523",
-   "impressions": "5216",
-   "reach": "3495",
-   "clicks": "76",
-   "actions": []
+   "spend": "56.524284",
+   "impressions": "9609",
+   "reach": "6438",
+   "clicks": "139",
+   "inline_link_clicks": "92",
+   "unique_inline_link_clicks": "72",
+   "actions": [
+    {
+     "action_type": "landing_page_view",
+     "value": "38"
+    }
+   ]
   }
  ]
 }

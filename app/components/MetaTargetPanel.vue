@@ -107,6 +107,27 @@ const regions = computed(() => {
 const showAllRegions = ref(false);
 const visibleRegions = computed(() => showAllRegions.value ? regions.value : regions.value.slice(0, 8));
 
+/** Cost of one step in ₸, or «—» when either the money or the count is unknown. */
+const perStep = (kzt: number | null, count: number) =>
+  kzt && count > 0 ? money(Math.round(kzt / count)) : "—";
+
+/**
+ * The path the money buys: shown, clicked, arrived, wrote. Each step carries its cost in ₸ and the
+ * share that survived from the step before, which is where the loss actually shows up.
+ */
+const funnel = computed(() => {
+  const c = cabinet.value;
+  if (!c) return [];
+  const per = (count: number) => (count > 0 && totalKzt.value ? Math.round(totalKzt.value / count) : null);
+  const share = (count: number, base: number) => (base > 0 ? count / base : null);
+  return [
+    { label: "Көрсетілім", value: c.impressions, cost: null, share: null, note: c.cpm === null ? "" : `CPM $ ${formatCount(c.cpm, 2)}` },
+    { label: "Ссылка басқан", value: c.linkClicks, cost: per(c.linkClicks), share: share(c.linkClicks, c.impressions), note: "" },
+    { label: "Сайтқа кірген", value: c.landingViews, cost: per(c.landingViews), share: share(c.landingViews, c.linkClicks), note: "" },
+    { label: "Хат жазысу басталды", value: c.conversations, cost: per(c.conversations), share: share(c.conversations, c.linkClicks), note: "" },
+  ];
+});
+
 const busy = ref(false);
 const message = ref<{ ok: boolean; text: string } | null>(null);
 const run = async (label: string, work: () => Promise<string>) => {
@@ -203,32 +224,57 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
         </span>
       </p>
 
+      <h3 class="meta-subhead">{{ periodLabel(period) }} — жарнама воронкасы</h3>
+      <ol class="meta-funnel">
+        <li v-for="step in funnel" :key="step.label" :class="{ weak: step.value === 0 }">
+          <span>{{ step.label }}</span>
+          <b>{{ formatCount(step.value) }}</b>
+          <small>
+            <template v-if="step.cost !== null">біреуі {{ money(step.cost) }}</template>
+            <template v-else-if="step.note">{{ step.note }}</template>
+          </small>
+          <i v-if="step.share !== null">{{ formatPercent(step.share) }} алдыңғысынан</i>
+        </li>
+      </ol>
+      <p class="panel-footnote">
+        «Ссылка басқан» — сілтемені басқан саны; адам саны бұдан аз, себебі біреу бірнеше рет басады.
+        <template v-if="cabinet.landingViews === 0">
+          Сайтқа кіру нөл: бұл айдағы науқандар сайтқа емес, <b>хат жазысуға</b> бағытталған.
+        </template>
+        <template v-else>
+          Ссылканы басқанмен сайтқа кіргеннің арасындағы алшақтық — жолда жоғалған трафик.
+        </template>
+      </p>
+
       <h3 class="meta-subhead">{{ periodLabel(period) }} — жобалар бойынша</h3>
       <div class="table-scroll">
         <table class="pnl-table compact">
           <thead>
             <tr>
-              <th scope="col">Жоба</th><th scope="col">Шығын, ₸</th><th scope="col">Доллар</th>
-              <th scope="col">Үлесі</th><th scope="col">Хат жазысу</th><th scope="col">Бір хат құны</th>
+              <th scope="col">Жоба</th><th scope="col">Шығын, ₸</th><th scope="col">Үлесі</th>
+              <th scope="col">Ссылка басқан</th><th scope="col">Бір басу құны</th>
+              <th scope="col">Хат жазысу</th><th scope="col">Бір хат құны</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.project.id">
               <th scope="row"><i :style="{ background: finance.colorOf(r.project.id) }" />{{ r.project.name }}</th>
-              <td><b>{{ money(r.facts!.spendKzt) }}</b></td>
-              <td>$ {{ formatCount(r.facts!.spend, 2) }}</td>
+              <td><b>{{ money(r.facts!.spendKzt) }}</b><small class="cell-sub">$ {{ formatCount(r.facts!.spend, 2) }}</small></td>
               <td>{{ formatPercent(totalKzt > 0 ? (r.facts!.spendKzt ?? 0) / totalKzt : null) }}</td>
+              <td>{{ formatCount(r.facts!.linkClicks) }}</td>
+              <td>{{ perStep(r.facts!.spendKzt, r.facts!.linkClicks) }}</td>
               <td>{{ formatCount(r.facts!.conversations) }}</td>
-              <td>{{ r.facts!.conversations > 0 && r.facts!.spendKzt ? money(Math.round(r.facts!.spendKzt / r.facts!.conversations)) : "—" }}</td>
+              <td>{{ perStep(r.facts!.spendKzt, r.facts!.conversations) }}</td>
             </tr>
-            <tr v-if="!rows.length"><td colspan="6" class="meta-empty">Кабинет ешбір жобаға жатқызылмаған — төмендегі бөлімнен таңдаңыз.</td></tr>
+            <tr v-if="!rows.length"><td colspan="7" class="meta-empty">Кабинет ешбір жобаға жатқызылмаған — төмендегі бөлімнен таңдаңыз.</td></tr>
             <tr v-else class="pnl-total">
               <th scope="row">Барлығы</th>
-              <td><b>{{ money(totalKzt) }}</b></td>
-              <td>$ {{ formatCount(totalUsd, 2) }}</td>
+              <td><b>{{ money(totalKzt) }}</b><small class="cell-sub">$ {{ formatCount(totalUsd, 2) }}</small></td>
               <td>100%</td>
+              <td>{{ formatCount(cabinet.linkClicks) }}</td>
+              <td>{{ perStep(totalKzt, cabinet.linkClicks) }}</td>
               <td>{{ formatCount(cabinet.conversations) }}</td>
-              <td>{{ cabinet.conversations > 0 && totalKzt ? money(Math.round(totalKzt / cabinet.conversations)) : "—" }}</td>
+              <td>{{ perStep(totalKzt, cabinet.conversations) }}</td>
             </tr>
           </tbody>
         </table>

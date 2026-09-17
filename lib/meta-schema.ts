@@ -40,10 +40,18 @@ export const META_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS meta_region_rules (
     region TEXT PRIMARY KEY, project_id TEXT REFERENCES workspaces(id),
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-  // An account either belongs to one project or is split by region.
-  "ALTER TABLE meta_accounts ADD COLUMN IF NOT EXISTS split_mode TEXT NOT NULL DEFAULT 'none'",
   `CREATE TABLE IF NOT EXISTS meta_sync_runs (
     id TEXT PRIMARY KEY, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT,
     status TEXT NOT NULL, accounts INTEGER NOT NULL DEFAULT 0, days INTEGER NOT NULL DEFAULT 0,
     range_from TEXT NOT NULL DEFAULT '', range_to TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '')`,
+
+  // Columns added after the tables shipped. These run last, so every table above already exists.
+  // An account either belongs to one project or is split by region.
+  "ALTER TABLE meta_accounts ADD COLUMN IF NOT EXISTS split_mode TEXT NOT NULL DEFAULT 'none'",
+  // Traffic: clicks on the link, the people behind them, and who actually arrived.
+  ...["meta_daily", "meta_period", "meta_region_daily"].flatMap(table => [
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS link_clicks INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS link_click_people INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS landing_views INTEGER NOT NULL DEFAULT 0`,
+  ]),
 ];

@@ -213,7 +213,7 @@ export async function loadFinance(periodInput: string, months = TREND_MONTHS): P
   const current: Record<string, FinanceMetrics> = {};
   for (const project of projects.results) {
     const rows = all.filter(e => e.workspaceId === project.id);
-    trend[project.id] = window.map(p => trendPoint(p, rows.filter(e => e.period === p), metricMap.get(metricKey(project.id, p)) ?? EMPTY_FINANCE_METRICS, bankFacts[project.id]?.[p] ?? null));
+    trend[project.id] = window.map(p => trendPoint(p, rows.filter(e => e.period === p), metricMap.get(metricKey(project.id, p)) ?? EMPTY_FINANCE_METRICS, bankFacts[project.id]?.[p] ?? null, metaFacts[project.id]?.[p] ?? null));
     current[project.id] = metricMap.get(metricKey(project.id, period)) ?? { ...EMPTY_FINANCE_METRICS };
     payrollMonths[project.id] = (payrollMonths[project.id] ?? []).sort();
   }

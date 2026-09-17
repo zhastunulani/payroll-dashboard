@@ -28,14 +28,21 @@ export interface MetaAccount {
   days: number;
 }
 
-/** Account metrics for one day. Reach is the people reached that day. */
+/** Account metrics for one day. Reach and linkClickPeople count people, so they do not add up. */
 export interface MetaDay {
   accountId: string;
   date: string;
   spend: number;
   impressions: number;
   reach: number;
+  /** Every click, including likes and comments: not a traffic number. */
   clicks: number;
+  /** Clicks on the link itself. */
+  linkClicks: number;
+  /** People who followed the link — unique, so it does not add up across days. */
+  linkClickPeople: number;
+  /** People who actually arrived, which is always fewer than those who clicked. */
+  landingViews: number;
   conversations: number;
   leads: number;
 }
@@ -53,6 +60,9 @@ export interface MetaRegionDay {
   impressions: number;
   reach: number;
   clicks: number;
+  linkClicks: number;
+  linkClickPeople: number;
+  landingViews: number;
   conversations: number;
 }
 
@@ -86,11 +96,25 @@ export interface MetaFacts {
   reachDays: number;
   frequency: number | null;
   clicks: number;
+  /** Clicks on the link. */
+  linkClicks: number;
+  /** People who followed the link — only when the window matches a period Meta aggregated. */
+  linkClickPeople: number | null;
+  /** Sum of the daily unique link clickers: an upper bound on people. */
+  linkClickPeopleDays: number;
+  /** People who arrived after clicking. The gap to `linkClicks` is the traffic lost on the way. */
+  landingViews: number;
   conversations: number;
   leads: number;
   cpm: number | null;
   cpc: number | null;
   ctr: number | null;
+  /** Share of people who followed the link and actually arrived. */
+  landingRate: number | null;
+  /** Share of link clicks that turned into a conversation. */
+  conversationRate: number | null;
+  costPerLinkClick: number | null;
+  costPerLandingView: number | null;
   costPerConversation: number | null;
   days: number;
   firstDate: string | null;
@@ -141,6 +165,8 @@ export interface MetaInsightRow {
   impressions?: string | number;
   reach?: string | number;
   clicks?: string | number;
+  inline_link_clicks?: string | number;
+  unique_inline_link_clicks?: string | number;
   frequency?: string | number;
   region?: string;
   campaign_id?: string;
@@ -160,6 +186,10 @@ export function toMetaDay(accountId: string, row: MetaInsightRow): MetaDay | nul
     impressions: int(row.impressions),
     reach: int(row.reach),
     clicks: int(row.clicks),
+    // Meta serves the link click both as a field and as an action; either is accepted.
+    linkClicks: int(row.inline_link_clicks ?? actionValue(row.actions, ["link_click"])),
+    linkClickPeople: int(row.unique_inline_link_clicks),
+    landingViews: actionValue(row.actions, ["landing_page_view", "omni_landing_page_view"]),
     conversations: conversationsOf(row.actions),
     leads: leadsOf(row.actions),
   };
@@ -208,8 +238,13 @@ export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = [], rateOf?: 
   });
   const matching = periods.filter(p => months.includes(p.period) && accounts.includes(p.accountId));
   // Reach can be summed across accounts and months only as an upper bound; a single month of a single
-  // account is the one case where Meta's own number is exact.
-  const reach = covered && matching.length === 1 ? matching[0]!.reach : null;
+  // account is the one case where Meta's own number is exact. Unique link clickers are people too, so
+  // they follow the same rule.
+  const exact = covered && matching.length === 1 ? matching[0]! : null;
+  const reach = exact?.reach ?? null;
+  const linkClickPeople = exact?.linkClickPeople ?? null;
+  const linkClicks = add(d => d.linkClicks);
+  const landingViews = add(d => d.landingViews);
 
   // Each day converts at its own official rate; a single missing day leaves ₸ empty rather than short.
   const converted = rateOf ? convertDaily(sorted.map(d => ({ date: d.date, amount: d.spend })), rateOf) : null;
@@ -223,11 +258,20 @@ export function metaFacts(days: MetaDay[], periods: MetaPeriod[] = [], rateOf?: 
     reachDays: add(d => d.reach),
     frequency: ratio(impressions, reach ?? 0),
     clicks,
+    linkClicks,
+    linkClickPeople,
+    linkClickPeopleDays: add(d => d.linkClickPeople),
+    landingViews,
     conversations,
     leads: add(d => d.leads),
     cpm: impressions > 0 ? round2((spend / impressions) * 1000) : null,
     cpc: ratio(spend, clicks),
-    ctr: ratio(clicks, impressions),
+    ctr: ratio(linkClicks, impressions),
+    // How much of the traffic that clicked actually arrived, and how much of it wrote.
+    landingRate: ratio(landingViews, linkClicks),
+    conversationRate: ratio(conversations, linkClicks),
+    costPerLinkClick: ratio(spend, linkClicks),
+    costPerLandingView: ratio(spend, landingViews),
     costPerConversation: ratio(spend, conversations),
     days: sorted.length,
     firstDate,
@@ -254,6 +298,8 @@ export function consolidateMetaFacts(list: (MetaFacts | null)[]): MetaFacts | nu
   const spend = round2(add(f => f.spend));
   const impressions = add(f => f.impressions);
   const clicks = add(f => f.clicks);
+  const linkClicks = add(f => f.linkClicks);
+  const landingViews = add(f => f.landingViews);
   const conversations = add(f => f.conversations);
   const kztKnown = facts.filter(f => f.spendKzt !== null);
   const rates = [...new Set(facts.map(f => f.fxRate).filter((r): r is number => r !== null))];
@@ -269,11 +315,20 @@ export function consolidateMetaFacts(list: (MetaFacts | null)[]): MetaFacts | nu
     reachDays: add(f => f.reachDays),
     frequency: null,
     clicks,
+    linkClicks,
+    // Audiences overlap between projects, so the people counts are never added together.
+    linkClickPeople: null,
+    linkClickPeopleDays: add(f => f.linkClickPeopleDays),
+    landingViews,
     conversations,
     leads: add(f => f.leads),
     cpm: impressions > 0 ? round2((spend / impressions) * 1000) : null,
     cpc: ratio(spend, clicks),
-    ctr: ratio(clicks, impressions),
+    ctr: ratio(linkClicks, impressions),
+    landingRate: ratio(landingViews, linkClicks),
+    conversationRate: ratio(conversations, linkClicks),
+    costPerLinkClick: ratio(spend, linkClicks),
+    costPerLandingView: ratio(spend, landingViews),
     costPerConversation: ratio(spend, conversations),
     days: Math.max(...facts.map(f => f.days)),
     firstDate: facts.map(f => f.firstDate).filter(Boolean).sort()[0] ?? null,

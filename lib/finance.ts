@@ -276,7 +276,24 @@ export interface BankFacts { gross: number; refunds: number; commission: number;
 /** Where the month's revenue comes from: bank statements win over the manual form, which wins over ledger rows. */
 export type RevenueSource = "bank" | "manual" | "ledger" | null;
 
-export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null) {
+/**
+ * What the ad cabinet reports for a project-month. `reach` and `linkClickPeople` count people, so they
+ * are null whenever the window is not one Meta itself deduplicated. `MetaFacts` satisfies this shape.
+ */
+export interface AdFacts {
+  spend: number;
+  spendKzt: number | null;
+  impressions: number;
+  reach: number | null;
+  linkClicks: number;
+  linkClickPeople: number | null;
+  landingViews: number;
+  conversations: number;
+}
+/** Whether the lead count on screen came from the CRM form or stood in from the ad cabinet. */
+export type LeadsSource = "manual" | "ads" | null;
+
+export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null, ads: AdFacts | null = null) {
   const included = entries.filter(e => e.disposition === "included" && e.amount !== null);
   const actual = included.filter(e => e.basis === "actual" && e.category !== "revenue");
   const planned = included.filter(e => e.basis === "plan" && e.category !== "revenue");
@@ -357,16 +374,37 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
   const obligations = { total: obligationTotal, paid: obligationPaid, unpaid: sum([obligationTotal, -obligationPaid]), share: obligationTotal > 0 ? obligationPaid / obligationTotal : null };
 
   const usdRows = marketingRows.filter(e => e.currency === "USD" && e.currencyAmount);
-  const leads = metrics.leads, customers = metrics.customers, units = metrics.units;
+  const customers = metrics.customers, units = metrics.units;
+  /**
+   * The hand-entered lead count comes from the CRM and is the business's own definition, so it wins.
+   * Where it is missing, the cabinet's started conversations stand in — for messaging campaigns that
+   * is the first contact with a person — and `leadsSource` says which number is on screen.
+   */
+  const leads = metrics.leads ?? (ads?.conversations ? ads.conversations : null);
+  const leadsSource: "manual" | "ads" | null = metrics.leads !== null ? "manual" : leads !== null ? "ads" : null;
   const funnel = {
     spend: marketing,
     spendUsd: usdRows.length ? sum(usdRows.map(e => e.currencyAmount!)) : null,
     leads,
+    leadsSource,
     customers,
     cpl: ratio(marketing, leads),
     cac: ratio(marketing, customers),
     conversion: ratio(customers, leads),
     confirmed: metrics.marketingAligned,
+    // Straight from the ad cabinet: what the money bought before the CRM sees anything.
+    impressions: ads?.impressions ?? null,
+    linkClicks: ads?.linkClicks ?? null,
+    linkClickPeople: ads?.linkClickPeople ?? null,
+    landingViews: ads?.landingViews ?? null,
+    conversations: ads?.conversations ?? null,
+    reach: ads?.reach ?? null,
+    costPerLinkClick: ads && ads.linkClicks > 0 ? ratio(marketing, ads.linkClicks) : null,
+    costPerLandingView: ads && ads.landingViews > 0 ? ratio(marketing, ads.landingViews) : null,
+    costPerConversation: ads && ads.conversations > 0 ? ratio(marketing, ads.conversations) : null,
+    // Of the people who clicked, how many arrived, and how many wrote.
+    landingRate: ads && ads.linkClicks > 0 ? ratio(ads.landingViews, ads.linkClicks) : null,
+    conversationRate: ads && ads.linkClicks > 0 ? ratio(ads.conversations, ads.linkClicks) : null,
   };
 
   const arpu = ratio(revenue, units);
@@ -429,9 +467,33 @@ export function summarizeFinance(entries: FinanceEntry[], metrics: FinanceMetric
   };
 }
 
-export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; metrics: FinanceMetrics; bank?: BankFacts | null }>) {
-  const summaries = projects.map(p => summarizeFinance(p.entries, p.metrics, p.bank ?? null));
-  const total = summarizeFinance(projects.flatMap(p => p.entries), EMPTY_FINANCE_METRICS);
+/**
+ * Pools ad facts across projects. Impressions, link clicks, landing views and conversations are events,
+ * so they add up; reach and unique link clickers count people whose audiences overlap, so they are left
+ * unknown rather than summed into a number that would overstate them.
+ */
+export function consolidateAdFacts(list: Array<AdFacts | null>): AdFacts | null {
+  const facts = list.filter((f): f is AdFacts => f !== null);
+  if (!facts.length) return null;
+  const add = (pick: (f: AdFacts) => number) => facts.reduce((a, f) => a + pick(f), 0);
+  const known = facts.filter(f => f.spendKzt !== null);
+  return {
+    spend: Math.round(add(f => f.spend) * 100) / 100,
+    spendKzt: known.length === facts.length ? known.reduce((a, f) => a + f.spendKzt!, 0) : null,
+    impressions: add(f => f.impressions),
+    reach: null,
+    linkClicks: add(f => f.linkClicks),
+    linkClickPeople: null,
+    landingViews: add(f => f.landingViews),
+    conversations: add(f => f.conversations),
+  };
+}
+
+export function consolidateFinance(projects: Array<{ entries: FinanceEntry[]; metrics: FinanceMetrics; bank?: BankFacts | null; ads?: AdFacts | null }>) {
+  const summaries = projects.map(p => summarizeFinance(p.entries, p.metrics, p.bank ?? null, p.ads ?? null));
+  // The pooled total keeps the traffic numbers: clicks and conversations are events, so they add up.
+  // Reach and unique clickers do not, and `consolidateAdFacts` leaves those out.
+  const total = summarizeFinance(projects.flatMap(p => p.entries), EMPTY_FINANCE_METRICS, null, consolidateAdFacts(projects.map(p => p.ads ?? null)));
   const revenueComplete = summaries.length > 0 && summaries.every(s => s.revenue !== null);
   const revenue = revenueComplete ? sum(summaries.map(s => s.revenue!)) : null;
   const profit = revenueComplete ? sum(summaries.map(s => s.profit!)) : null;
@@ -488,6 +550,8 @@ export type FinanceTrendPoint = {
   plan: number | null;
   headcount: number;
   leads: number | null;
+  /** Whether that lead count came from the CRM form or stood in from the ad cabinet. */
+  leadsSource: LeadsSource;
   customers: number | null;
   units: number | null;
   cac: number | null;
@@ -495,8 +559,8 @@ export type FinanceTrendPoint = {
   hasData: boolean;
 };
 
-export function trendPoint(period: string, entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null): FinanceTrendPoint {
-  const s = summarizeFinance(entries, metrics, bank);
+export function trendPoint(period: string, entries: FinanceEntry[], metrics: FinanceMetrics, bank: BankFacts | null = null, ads: AdFacts | null = null): FinanceTrendPoint {
+  const s = summarizeFinance(entries, metrics, bank, ads);
   return {
     period,
     cost: s.cost,
@@ -512,7 +576,8 @@ export function trendPoint(period: string, entries: FinanceEntry[], metrics: Fin
     kinds: Object.fromEntries(KIND_ORDER.map(k => [k, s.kinds[k].total])) as Record<FinanceKind, number>,
     plan: s.plan,
     headcount: s.payroll.headcount,
-    leads: metrics.leads,
+    leads: s.funnel.leads,
+    leadsSource: s.funnel.leadsSource,
     customers: metrics.customers,
     units: metrics.units,
     cac: s.funnel.cac,

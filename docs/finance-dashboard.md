@@ -86,7 +86,14 @@ actually charged, so target spend no longer depends on a figure typed from a mon
   hour. In Business Settings → Users → System users, create a user, give it the ad accounts **and the
   app**, then «Generate new token» with **`ads_read`** and **`business_management`**. Such a token has no
   expiry date. Without `ads_read` the panel says so instead of showing zeros.
-- **Several tokens are allowed**, comma-separated in `META_ACCESS_TOKEN`, because a system user belongs to
+- **The token is saved from the browser, not the server.** Production reads its environment from a
+  systemd file that only SSH can change, which made a token in `META_ACCESS_TOKEN` unreplaceable from
+  the UI. It is now stored in `app_settings` under `meta:token`, **encrypted** with a key derived from
+  `SESSION_SECRET` (`lib/secrets.ts`, AES-256-GCM): the database is shared between the local machine
+  and production, so saving it once works in both, while a copy of the database on its own reveals
+  nothing. The environment variable still works and the two sets are merged. The token is write-only —
+  the browser never receives it back, only its type, expiry and the businesses it reaches.
+- **Several tokens are allowed**, comma-separated, because a system user belongs to
   one business and the owner's cabinets sit in two (EDUSER and Tamshy Lab). Each token is asked for the
   accounts it can read and the results are merged; a token that fails is named in the sync message and
   loses none of the others. The panel lists every token with its type, expiry and the businesses it

@@ -123,6 +123,12 @@ export function useMeta() {
       act({ action: "account", id, projectId, tracked, note, splitMode }),
     saveRegion: (region: string, projectId: string | null, reset = false) => act({ action: "region", region, projectId, reset }),
     saveRate: (forPeriod: string, rate: number | null, source = "Қолмен енгізілген") => act({ action: "rate", period: forPeriod, rate, source }),
+    /** Saves the pasted token(s) for every environment at once; an empty value clears them. */
+    async saveToken(token: string) {
+      const result = await post<{ ok: true; stored: number }>({ action: "token", token });
+      await load();
+      return result;
+    },
     /** Fills in the official ₸ rates for days that lack one; needs no Meta token. */
     async backfillRates() {
       const result = await post<{ ok: true; fetched: number; missing: string[] }>({ action: "rates" });

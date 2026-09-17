@@ -327,3 +327,9 @@ g.dim .chart-cap { opacity: .4; }
 .meta-funnel > li.weak > b { color: var(--muted); }
 @media (max-width: 900px) { .meta-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 460px) { .meta-funnel { grid-template-columns: 1fr; } }
+
+/* Pasting the Meta token: write-only, so there is nothing to show back, only a field and two actions. */
+.meta-token-form { display: grid; gap: 8px; max-width: 560px; }
+.meta-token-form textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.meta-token-actions { display: flex; align-items: center; gap: 14px; }
+.meta-token-actions .danger { color: var(--danger); }

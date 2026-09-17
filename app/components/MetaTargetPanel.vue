@@ -186,6 +186,19 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
   await meta.saveRegion(region, value === "" ? null : value, value === "auto");
   return "Өңір сақталды.";
 });
+
+// The token is write-only: it is saved encrypted and never read back into the browser.
+const tokenDraft = ref("");
+const storeToken = () => run("Токен", async () => {
+  const result = await meta.saveToken(tokenDraft.value);
+  tokenDraft.value = "";
+  return `${result.stored} токен сақталды. Енді «Жаңарту» батырмасын басыңыз.`;
+});
+const clearToken = () => run("Токен", async () => {
+  await meta.saveToken("");
+  tokenDraft.value = "";
+  return "Токен өшірілді. Бұрын тартылған дерек сақталады, тек жаңаруы тоқтайды.";
+});
 </script>
 
 <template>
@@ -205,9 +218,9 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
     </header>
 
     <p v-if="!token?.present" class="meta-setup">
-      Кабинет деректерін тарту үшін серверге <code>META_ACCESS_TOKEN</code> айнымалысы керек. Ол Meta-дағы
-      <b>Системный пользователь</b> токені болуы керек — оның мерзімі бітпейді. Рұқсаты:
-      <code>ads_read</code> және <code>business_management</code> (соңғысы басқа кабинеттерді көру үшін).
+      Кабинет деректерін тарту үшін Meta токені керек. Ол <b>Системный пользователь</b> токені болуы
+      керек — оның мерзімі бітпейді. Рұқсаттары: <code>ads_read</code> және
+      <code>business_management</code>. Төмендегі «Кабинеттер және токендер» бөліміне қойыңыз.
     </p>
     <p v-else-if="missingScope" class="meta-setup warn">
       <TriangleAlert :size="14" /> <span>Токенде <code>ads_read</code> рұқсаты жоқ — шығын сандары келмейді.</span>
@@ -383,10 +396,21 @@ const setRegion = (region: string, value: string) => run("Өңір", async () =>
           </tbody>
         </table>
       </div>
-      <p v-if="tokenList.length > 0" class="panel-footnote">
-        Бір жүйелік пайдаланушы бір бизнеске тиесілі. Кабинеттер екі бизнесте болғандықтан, екі токен
-        керек — оларды <code>META_ACCESS_TOKEN</code> ішіне үтірмен қатар жазуға болады.
-      </p>
+      <form class="meta-token-form" @submit.prevent="storeToken">
+        <label class="form-field">
+          <span>Токен қосу немесе ауыстыру</span>
+          <textarea v-model="tokenDraft" rows="2" placeholder="EAA… — бірнешеуін үтірмен қатар қоюға болады" spellcheck="false" />
+          <small>
+            Токен шифрланып сақталады және сайтта бірден жұмыс істейді — серверге кірудің қажеті жоқ.
+            Бір жүйелік пайдаланушы бір бизнеске тиесілі, сондықтан кабинеттер бірнеше бизнесте болса,
+            әр бизнеске бір токен қойыңыз.
+          </small>
+        </label>
+        <div class="meta-token-actions">
+          <button type="submit" class="text-button" :disabled="busy || !tokenDraft.trim()"><Check :size="14" /> Сақтау</button>
+          <button v-if="tokenList.length" type="button" class="text-button danger" :disabled="busy" @click="clearToken">Өшіру</button>
+        </div>
+      </form>
       <div v-if="spending.length" class="table-scroll">
         <table class="pnl-table compact">
           <thead><tr><th scope="col">Кабинет</th><th scope="col">Дерек</th><th scope="col">Қалай бөлінеді</th></tr></thead>

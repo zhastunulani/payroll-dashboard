@@ -1,4 +1,5 @@
 import { getRawDb, MAIN_WORKSPACE_ID } from "./database";
+import { decryptSecret, encryptSecret } from "./secrets.ts";
 import { nbkRates, rateLookup } from "./fx.ts";
 import {
   consolidateMetaFacts, metaFacts, metaMonth, metaMonthRange, metaRegionRules, parseTokens,
@@ -16,15 +17,52 @@ export function ensureMetaDatabase() {
 }
 
 /**
- * The tokens live only in the environment; they are never stored in the database or sent to the browser.
+ * The tokens, from the environment and from the database, and never sent to the browser.
  *
  * More than one is allowed, separated by commas or newlines: a Meta system user belongs to a single
- * business, and the owner's cabinets are spread over two, so one token cannot reach them all. Each
- * token is tried for the accounts it can read and the results are merged.
+ * business, and the owner's cabinets can be spread over several, so one token cannot reach them all.
+ * Each token is tried for the accounts it can read and the results are merged.
+ *
+ * The database is the practical place for them. Production reads its environment from a systemd file
+ * that only SSH can change, while the database is shared with the local machine — so a token saved
+ * from the browser works everywhere at once. It is stored encrypted (see `lib/secrets.ts`).
  */
-export const metaTokens = (): string[] => parseTokens(process.env.META_ACCESS_TOKEN);
-/** The first token, for calls that only need to know whether the integration is configured at all. */
-export const metaToken = () => metaTokens()[0] ?? "";
+const TOKEN_SETTING = "meta:token";
+
+export async function metaTokens(): Promise<string[]> {
+  const fromEnv = parseTokens(process.env.META_ACCESS_TOKEN);
+  let fromDb: string[] = [];
+  try {
+    const row = await getRawDb().prepare("SELECT value FROM app_settings WHERE key=?").bind(TOKEN_SETTING).first<{ value: string }>();
+    if (row?.value) fromDb = parseTokens(decryptSecret(row.value) ?? "");
+  } catch {
+    // A missing table or an unreadable secret must not stop the environment token from working.
+  }
+  return [...new Set([...fromEnv, ...fromDb])];
+}
+
+/** Saves the tokens the owner pasted, or clears them. Returns how many were stored. */
+export async function saveMetaToken(value: string): Promise<number> {
+  await ensureMetaDatabase();
+  const tokens = parseTokens(value);
+  const db = getRawDb();
+  if (!tokens.length) {
+    await db.prepare("DELETE FROM app_settings WHERE key=?").bind(TOKEN_SETTING).run();
+    tokenCache.clear();
+    return 0;
+  }
+  // Checked before it is stored: a token that cannot read anything is a mistake worth catching now.
+  const checked = await Promise.all(tokens.map(async token => ({ token, info: await metaTokenInfo({ token, deadline: Date.now() + 15_000 }).catch(() => BLANK_TOKEN) })));
+  const broken = checked.filter(c => !c.info.valid);
+  if (broken.length === checked.length) {
+    throw new Error(`Токен жарамсыз: Meta оны қабылдамады. Business Settings → Системные пользователи бөлімінен жаңа токен алыңыз.`);
+  }
+  await db.prepare(`INSERT INTO app_settings(key, value, updated_at) VALUES(?,?,?)
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at`)
+    .bind(TOKEN_SETTING, encryptSecret(tokens.join(",")), new Date().toISOString()).run();
+  tokenCache.clear();
+  return tokens.length;
+}
 
 /**
  * Checking a token costs a round trip to Meta, so the answer is cached: opening a page must not wait
@@ -173,8 +211,8 @@ async function syncFxRates(days: string[], deadline: number, fetchImpl?: typeof 
  */
 export async function syncMeta(options: MetaSyncOptions): Promise<MetaSyncResult> {
   await ensureMetaDatabase();
-  const tokens = metaTokens();
-  if (!tokens.length) throw new Error("META_ACCESS_TOKEN орнатылмаған. Токенді .env файлына қосыңыз.");
+  const tokens = await metaTokens();
+  if (!tokens.length) throw new Error("Meta токені қосылмаған. Панельдегі «Кабинеттер және токендер» бөлімінен қосыңыз.");
   const db = getRawDb();
   const runId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -393,7 +431,7 @@ export async function saveMetaAccount(id: string, projectId: string | null, trac
 export async function loadMeta(from: string, to: string): Promise<MetaData> {
   await ensureMetaDatabase();
   const db = getRawDb();
-  const tokens = metaTokens();
+  const tokens = await metaTokens();
   // The month on screen. Only its rows are sent: a year of raw daily and regional rows was almost a
   // megabyte of JSON, and the page charts one month at a time — the rest of the year comes as `history`.
   const month = metaMonth(to);

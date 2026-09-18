@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RefreshCw, TriangleAlert, Plug, Check, CalendarClock } from "lucide-vue-next";
-import { reachNote, regionLabel } from "../../lib/meta";
+import { regionLabel } from "../../lib/meta";
 
 /**
  * Meta advertising: what the ad cabinet actually charged, in ₸, per project and month.
@@ -10,6 +10,7 @@ import { reachNote, regionLabel } from "../../lib/meta";
  */
 const meta = useMeta();
 const finance = useFinance();
+const { t } = useLocale();
 const { period } = meta;
 onMounted(meta.load);
 watch(period, meta.load);
@@ -61,39 +62,51 @@ const historyChart = computed(() => ({
 }));
 
 /** One line per token: whether it works, how long it lasts and which businesses it reaches. */
-const tokenList = computed(() => (meta.data.value?.tokens ?? []).map(t => {
-  const expires = t.expiresAt ? new Date(t.expiresAt) : null;
+const tokenList = computed(() => (meta.data.value?.tokens ?? []).map(tok => {
+  const expires = tok.expiresAt ? new Date(tok.expiresAt) : null;
   const hours = expires ? (expires.getTime() - Date.now()) / 3_600_000 : Infinity;
-  const life = !t.valid
-    ? { tone: "bad", text: "жарамсыз немесе мерзімі бітті" }
+  const life = !tok.valid
+    ? { tone: "bad", text: t("жарамсыз немесе мерзімі бітті") }
     : !expires
-      ? { tone: "good", text: "мерзімі жоқ — тұрақты" }
+      ? { tone: "good", text: t("мерзімі жоқ — тұрақты") }
       : hours <= 0
-        ? { tone: "bad", text: "мерзімі бітті" }
+        ? { tone: "bad", text: t("мерзімі бітті") }
         : hours < 72
-          ? { tone: "warn", text: `${hours < 1 ? "1 сағаттан аз" : `${Math.round(hours)} сағат`} ішінде бітеді` }
-          : { tone: "warn", text: `${expires.toLocaleDateString("ru-RU")} дейін — уақытша` };
+          ? { tone: "warn", text: `${hours < 1 ? t("1 сағаттан аз") : `${Math.round(hours)} ${t("сағат")}`} ${t("ішінде бітеді")}` }
+          : { tone: "warn", text: `${expires.toLocaleDateString("ru-RU")} ${t("дейін — уақытша")}` };
   return {
-    ...t, ...life,
+    ...tok, ...life,
     // A system-user token is the only kind that does not expire; naming the type makes the difference plain.
-    kind: t.type === "SYSTEM_USER" ? "Жүйелік пайдаланушы" : t.type === "USER" ? "Жеке (уақытша)" : t.type || "—",
-    missing: ["ads_read", "business_management"].filter(need => !t.scopes.includes(need)),
+    kind: tok.type === "SYSTEM_USER" ? t("Жүйелік пайдаланушы") : tok.type === "USER" ? t("Жеке (уақытша)") : tok.type || "—",
+    missing: ["ads_read", "business_management"].filter(need => !tok.scopes.includes(need)),
   };
 }));
 const tokenState = computed(() => {
   const list = tokenList.value;
-  if (!list.length) return { tone: "off", text: "Токен қосылмаған" };
-  const working = list.filter(t => t.valid && t.tone !== "bad");
-  if (!working.length) return { tone: "bad", text: list.length > 1 ? "Токендер жарамсыз" : "Токен жарамсыз немесе мерзімі бітті" };
-  const permanent = working.filter(t => !t.expiresAt);
-  const label = list.length > 1 ? `${working.length}/${list.length} токен` : "Токен";
-  if (permanent.length === working.length) return { tone: "good", text: `${label} — тұрақты` };
-  const soonest = working.filter(t => t.expiresAt).sort((a, b) => a.expiresAt!.localeCompare(b.expiresAt!))[0]!;
+  if (!list.length) return { tone: "off", text: t("Токен қосылмаған") };
+  const working = list.filter(tok => tok.valid && tok.tone !== "bad");
+  if (!working.length) return { tone: "bad", text: list.length > 1 ? t("Токендер жарамсыз") : t("Токен жарамсыз немесе мерзімі бітті") };
+  const permanent = working.filter(tok => !tok.expiresAt);
+  const label = list.length > 1 ? `${working.length}/${list.length} ${t("токен")}` : t("Токен");
+  if (permanent.length === working.length) return { tone: "good", text: `${label} — ${t("тұрақты")}` };
+  const soonest = working.filter(tok => tok.expiresAt).sort((a, b) => a.expiresAt!.localeCompare(b.expiresAt!))[0]!;
   return { tone: soonest.tone, text: `${label} — ${soonest.text}` };
 });
+/**
+ * The reach sentence is built here rather than in `lib/meta.ts`, because the number sits inside it and
+ * a whole formatted sentence cannot be a translation key.
+ */
+const reachSub = computed(() => {
+  const c = cabinet.value;
+  if (!c) return "";
+  return c.reach !== null
+    ? `${formatCount(c.reach)} ${t("адам — Meta бір адамды бір рет санаған")}`
+    : `${formatCount(c.reachDays)} ${t("көрсетілім-күн — бір адам бірнеше күн көрсе, қайта саналады. Нақты адам санын тек толық ай үшін Meta береді.")}`;
+});
+// Every configured token is considered: with several, one of them missing the permission is not a problem.
 const missingScope = computed(() => {
-  const t = token.value;
-  return t?.present && t.valid && !t.scopes.includes("ads_read");
+  const valid = tokenList.value.filter(tok => tok.valid);
+  return valid.length > 0 && valid.every(tok => !tok.scopes.includes("ads_read"));
 });
 /** Accounts that spend but have not been told where the money belongs. */
 const undecided = computed(() => spending.value.filter(a => a.splitMode === "none"));
@@ -107,7 +120,7 @@ const daily = computed(() => {
     labels: list.map(r => r.date.slice(8)),
     details: list.map(r => new Date(`${r.date}T00:00:00Z`).toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" })),
     series: [{
-      key: "spend", label: "Күндік шығын, ₸", color: "#2563eb",
+      key: "spend", label: t("Күндік шығын, ₸"), color: "#2563eb",
       values: list.map(r => { const rate = rateOf.get(r.date); return rate ? Math.round(r.spend * rate) : null; }),
     }],
   };
@@ -141,10 +154,10 @@ const funnel = computed(() => {
   const per = (count: number) => (count > 0 && totalKzt.value ? Math.round(totalKzt.value / count) : null);
   const share = (count: number, base: number) => (base > 0 ? count / base : null);
   return [
-    { label: "Көрсетілім", value: c.impressions, cost: null, share: null, note: c.cpm === null ? "" : `CPM $ ${formatCount(c.cpm, 2)}` },
-    { label: "Ссылка басқан", value: c.linkClicks, cost: per(c.linkClicks), share: share(c.linkClicks, c.impressions), note: "" },
-    { label: "Сайтқа кірген", value: c.landingViews, cost: per(c.landingViews), share: share(c.landingViews, c.linkClicks), note: "" },
-    { label: "Хат жазысу басталды", value: c.conversations, cost: per(c.conversations), share: share(c.conversations, c.linkClicks), note: "" },
+    { label: t("Көрсетілім"), value: c.impressions, cost: null, share: null, note: c.cpm === null ? "" : `CPM $ ${formatCount(c.cpm, 2)}` },
+    { label: t("Ссылка басқан"), value: c.linkClicks, cost: per(c.linkClicks), share: share(c.linkClicks, c.impressions), note: "" },
+    { label: t("Сайтқа кірген"), value: c.landingViews, cost: per(c.landingViews), share: share(c.landingViews, c.linkClicks), note: "" },
+    { label: t("Хат жазысу басталды"), value: c.conversations, cost: per(c.conversations), share: share(c.conversations, c.linkClicks), note: "" },
   ];
 });
 
@@ -157,7 +170,7 @@ const run = async (label: string, work: () => Promise<string>) => {
     message.value = { ok: true, text: await work() };
     await finance.load();
   } catch (e) {
-    message.value = { ok: false, text: messageOf(e, `${label} орындалмады.`) };
+    message.value = { ok: false, text: messageOf(e, `${t(label)} ${t("орындалмады.")}`) };
   } finally {
     busy.value = false;
   }
@@ -169,22 +182,22 @@ const sync = () => run("Жаңарту", async () => {
   start.setUTCMonth(start.getUTCMonth() - 11, 1);
   const r = await meta.sync(start.toISOString().slice(0, 10), to);
   return r.skipped.length
-    ? `${r.accounts} кабинет оқылды, ${r.days} күн, ${r.rates} бағам. Оқылмағаны: ${r.skipped.map(s => s.reason).join("; ")}`
-    : `${r.accounts} кабинет оқылды, ${r.days} күн жазылды, ${r.rates} күннің бағамы алынды.`;
+    ? `${r.accounts} ${t("кабинет оқылды,")} ${r.days} ${t("күн,")} ${r.rates} ${t("бағам. Оқылмағаны:")} ${r.skipped.map(s => s.reason).join("; ")}`
+    : `${r.accounts} ${t("кабинет оқылды,")} ${r.days} ${t("күн жазылды,")} ${r.rates} ${t("күннің бағамы алынды.")}`;
 });
 const fetchRates = () => run("Бағам", async () => {
   const r = await meta.backfillRates();
   return r.missing.length
-    ? `${r.fetched} күннің бағамы алынды; ${r.missing.length} күн бағамсыз қалды (${r.missing.slice(0, 3).join(", ")}…).`
-    : `${r.fetched} күннің бағамы Ұлттық Банктен алынды.`;
+    ? `${r.fetched} ${t("күннің бағамы алынды;")} ${r.missing.length} ${t("күн бағамсыз қалды")} (${r.missing.slice(0, 3).join(", ")}…).`
+    : `${r.fetched} ${t("күннің бағамы Ұлттық Банктен алынды.")}`;
 });
 const setSplit = (id: string, value: string) => run("Кабинет", async () => {
   await meta.saveAccount(id, value === "region" || value === "" ? null : value, true, "", value === "region" ? "region" : "none");
-  return value === "region" ? "Кабинет өңірлер бойынша бөлінеді." : value === "" ? "Кабинет жобаға жатқызылмады." : "Кабинет жобаға жатқызылды.";
+  return value === "region" ? t("Кабинет өңірлер бойынша бөлінеді.") : value === "" ? t("Кабинет жобаға жатқызылмады.") : t("Кабинет жобаға жатқызылды.");
 });
 const setRegion = (region: string, value: string) => run("Өңір", async () => {
   await meta.saveRegion(region, value === "" ? null : value, value === "auto");
-  return "Өңір сақталды.";
+  return t("Өңір сақталды.");
 });
 
 // The token is write-only: it is saved encrypted and never read back into the browser.
@@ -192,38 +205,38 @@ const tokenDraft = ref("");
 const storeToken = () => run("Токен", async () => {
   const result = await meta.saveToken(tokenDraft.value);
   tokenDraft.value = "";
-  return `${result.stored} токен сақталды. Енді «Жаңарту» батырмасын басыңыз.`;
+  return `${result.stored} ${t("токен сақталды. Енді «Жаңарту» батырмасын басыңыз.")}`;
 });
 const clearToken = () => run("Токен", async () => {
   await meta.saveToken("");
   tokenDraft.value = "";
-  return "Токен өшірілді. Бұрын тартылған дерек сақталады, тек жаңаруы тоқтайды.";
+  return t("Токен өшірілді. Бұрын тартылған дерек сақталады, тек жаңаруы тоқтайды.");
 });
 </script>
 
 <template>
-  <section class="panel analytics-panel meta-panel" aria-label="Meta жарнама">
+  <section class="panel analytics-panel meta-panel" :aria-label="t('Meta жарнама')">
     <header>
       <div>
         <span class="eyebrow">Meta · Facebook / Instagram</span>
-        <h2>Таргет шығыны — кабинеттен алынған нақты дерек</h2>
+        <h2>{{ t("Таргет шығыны — кабинеттен алынған нақты дерек") }}</h2>
       </div>
       <div class="meta-actions">
         <span class="meta-pill" :class="tokenState.tone"><Plug :size="13" />{{ tokenState.text }}</span>
-        <button type="button" class="text-button" :disabled="busy" @click="fetchRates"><CalendarClock :size="14" /> Бағам</button>
-        <button type="button" class="text-button" :disabled="busy || !token?.present" @click="sync">
-          <RefreshCw :size="14" :class="{ spin: busy }" /> Жаңарту
+        <button type="button" class="text-button" :disabled="busy" @click="fetchRates"><CalendarClock :size="14" /> {{ t("Бағам") }}</button>
+        <button type="button" class="text-button" :disabled="busy || !tokenList.length" @click="sync">
+          <RefreshCw :size="14" :class="{ spin: busy }" /> {{ t("Жаңарту") }}
         </button>
       </div>
     </header>
 
     <p v-if="!token?.present" class="meta-setup">
-      Кабинет деректерін тарту үшін Meta токені керек. Ол <b>Системный пользователь</b> токені болуы
-      керек — оның мерзімі бітпейді. Рұқсаттары: <code>ads_read</code> және
-      <code>business_management</code>. Төмендегі «Кабинеттер және токендер» бөліміне қойыңыз.
+      {{ t("Кабинет деректерін тарту үшін Meta токені керек. Ол") }} <b>Системный пользователь</b>
+      {{ t("токені болуы керек — оның мерзімі бітпейді. Рұқсаттары:") }} <code>ads_read</code>
+      {{ t("және") }} <code>business_management</code>. {{ t("Төмендегі «Кабинеттер және токендер» бөліміне қойыңыз.") }}
     </p>
     <p v-else-if="missingScope" class="meta-setup warn">
-      <TriangleAlert :size="14" /> <span>Токенде <code>ads_read</code> рұқсаты жоқ — шығын сандары келмейді.</span>
+      <TriangleAlert :size="14" /> <span>{{ t("Токенде") }} <code>ads_read</code> {{ t("рұқсаты жоқ — шығын сандары келмейді.") }}</span>
     </p>
     <p v-if="message" class="meta-message" :class="{ bad: !message.ok }">
       <component :is="message.ok ? Check : TriangleAlert" :size="14" /> {{ message.text }}
@@ -232,61 +245,60 @@ const clearToken = () => run("Токен", async () => {
     <template v-if="cabinet">
       <div class="kpi-row meta-kpis">
         <KpiTile
-          label="Таргет шығыны" :value="money(totalKzt || null)"
-          :sub="`$ ${formatCount(totalUsd, 2)}${effectiveRate ? ` · орташа ${formatCount(effectiveRate, 2)} ₸/$` : ''}`"
+          :label="t('Таргет шығыны')" :value="money(totalKzt || null)"
+          :sub="`$ ${formatCount(totalUsd, 2)}${effectiveRate ? ` · ${t('орташа')} ${formatCount(effectiveRate, 2)} ₸/$` : ''}`"
           tone="brand"
         />
-        <KpiTile label="Қамту" :value="formatCount(cabinet.reach ?? cabinet.reachDays)" :sub="reachNote(cabinet)" good-when="up" />
+        <KpiTile :label="t('Қамту')" :value="formatCount(cabinet.reach ?? cabinet.reachDays)" :sub="reachSub" good-when="up" />
         <KpiTile
-          label="Хат жазысу басталды" :value="formatCount(cabinet.conversations)"
-          :sub="cabinet.conversations > 0 && totalKzt ? `біреуі ${money(Math.round(totalKzt / cabinet.conversations))}` : ''"
+          :label="t('Хат жазысу басталды')" :value="formatCount(cabinet.conversations)"
+          :sub="cabinet.conversations > 0 && totalKzt ? `${t('біреуі')} ${money(Math.round(totalKzt / cabinet.conversations))}` : ''"
           good-when="up"
         />
-        <KpiTile label="CPM" :value="cabinet.cpm === null ? '—' : `$ ${formatCount(cabinet.cpm, 2)}`" :sub="`${formatCount(cabinet.impressions)} көрсетілім · CTR ${formatPercent(cabinet.ctr)}`" />
+        <KpiTile label="CPM" :value="cabinet.cpm === null ? '—' : `$ ${formatCount(cabinet.cpm, 2)}`" :sub="`${formatCount(cabinet.impressions)} ${t('көрсетілім')} · CTR ${formatPercent(cabinet.ctr)}`" />
       </div>
 
       <p v-if="missingRates.length" class="meta-setup warn">
         <TriangleAlert :size="14" />
-        <span>{{ missingRates.length }} күннің бағамы жоқ, сондықтан теңге сомасы толық емес. «Бағам» батырмасын басыңыз.</span>
+        <span>{{ missingRates.length }} {{ t("күннің бағамы жоқ, сондықтан теңге сомасы толық емес. «Бағам» батырмасын басыңыз.") }}</span>
       </p>
       <p v-if="undecided.length" class="meta-setup warn">
         <TriangleAlert :size="14" />
         <span>
-          {{ undecided.map(a => a.name).join(", ") }} — қай жобаға жататыны белгіленбеген, сондықтан бұл
-          шығын жобалардың есебіне кірмейді. Төмендегі «Кабинеттер» бөлімінен таңдаңыз.
+          {{ undecided.map(a => a.name).join(", ") }} — {{ t("қай жобаға жататыны белгіленбеген, сондықтан бұл шығын жобалардың есебіне кірмейді. Төмендегі «Кабинеттер» бөлімінен таңдаңыз.") }}
         </span>
       </p>
 
-      <h3 class="meta-subhead">{{ periodLabel(period) }} — жарнама воронкасы</h3>
+      <h3 class="meta-subhead">{{ periodLabel(period) }} — {{ t("жарнама воронкасы") }}</h3>
       <ol class="meta-funnel">
         <li v-for="step in funnel" :key="step.label" :class="{ weak: step.value === 0 }">
           <span>{{ step.label }}</span>
           <b>{{ formatCount(step.value) }}</b>
           <small>
-            <template v-if="step.cost !== null">біреуі {{ money(step.cost) }}</template>
+            <template v-if="step.cost !== null">{{ t("біреуі") }} {{ money(step.cost) }}</template>
             <template v-else-if="step.note">{{ step.note }}</template>
           </small>
-          <i v-if="step.share !== null">{{ formatPercent(step.share) }} алдыңғысынан</i>
+          <i v-if="step.share !== null">{{ formatPercent(step.share) }} {{ t("алдыңғысынан") }}</i>
         </li>
       </ol>
       <p class="panel-footnote">
-        «Ссылка басқан» — сілтемені басқан саны; адам саны бұдан аз, себебі біреу бірнеше рет басады.
+        {{ t("«Ссылка басқан» — сілтемені басқан саны; адам саны бұдан аз, себебі біреу бірнеше рет басады.") }}
         <template v-if="cabinet.landingViews === 0">
-          Сайтқа кіру нөл: бұл айдағы науқандар сайтқа емес, <b>хат жазысуға</b> бағытталған.
+          {{ t("Сайтқа кіру нөл: бұл айдағы науқандар сайтқа емес,") }} <b>{{ t("хат жазысуға бағытталған.") }}</b>
         </template>
         <template v-else>
-          Ссылканы басқанмен сайтқа кіргеннің арасындағы алшақтық — жолда жоғалған трафик.
+          {{ t("Ссылканы басқанмен сайтқа кіргеннің арасындағы алшақтық — жолда жоғалған трафик.") }}
         </template>
       </p>
 
-      <h3 class="meta-subhead">{{ periodLabel(period) }} — жобалар бойынша</h3>
+      <h3 class="meta-subhead">{{ periodLabel(period) }} — {{ t("жобалар бойынша") }}</h3>
       <div class="table-scroll">
         <table class="pnl-table compact">
           <thead>
             <tr>
-              <th scope="col">Жоба</th><th scope="col">Шығын, ₸</th><th scope="col">Үлесі</th>
-              <th scope="col">Ссылка басқан</th><th scope="col">Бір басу құны</th>
-              <th scope="col">Хат жазысу</th><th scope="col">Бір хат құны</th>
+              <th scope="col">{{ t("Жоба") }}</th><th scope="col">{{ t("Шығын, ₸") }}</th><th scope="col">{{ t("Үлесі") }}</th>
+              <th scope="col">{{ t("Ссылка басқан") }}</th><th scope="col">{{ t("Бір басу құны") }}</th>
+              <th scope="col">{{ t("Хат жазысу") }}</th><th scope="col">{{ t("Бір хат құны") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -299,9 +311,9 @@ const clearToken = () => run("Токен", async () => {
               <td>{{ formatCount(r.facts!.conversations) }}</td>
               <td>{{ perStep(r.facts!.spendKzt, r.facts!.conversations) }}</td>
             </tr>
-            <tr v-if="!rows.length"><td colspan="7" class="meta-empty">Кабинет ешбір жобаға жатқызылмаған — төмендегі бөлімнен таңдаңыз.</td></tr>
+            <tr v-if="!rows.length"><td colspan="7" class="meta-empty">{{ t("Кабинет ешбір жобаға жатқызылмаған — төмендегі бөлімнен таңдаңыз.") }}</td></tr>
             <tr v-else class="pnl-total">
-              <th scope="row">Барлығы</th>
+              <th scope="row">{{ t("Барлығы") }}</th>
               <td><b>{{ money(totalKzt) }}</b><small class="cell-sub">$ {{ formatCount(totalUsd, 2) }}</small></td>
               <td>100%</td>
               <td>{{ formatCount(cabinet.linkClicks) }}</td>
@@ -314,48 +326,48 @@ const clearToken = () => run("Токен", async () => {
       </div>
 
       <template v-if="history.list.length">
-        <h3 class="meta-subhead">Ай сайынғы таргет шығыны, ₸</h3>
+        <h3 class="meta-subhead">{{ t("Ай сайынғы таргет шығыны, ₸") }}</h3>
         <ChartColumns
-          caption="Таргет шығыны айлар бойынша, теңге" :labels="historyChart.labels" :details="historyChart.details"
+          :caption="t('Таргет шығыны айлар бойынша, теңге')" :labels="historyChart.labels" :details="historyChart.details"
           :series="historyChart.series" :format="money" :axis-format="compactMoney" :height="220"
         />
         <div class="table-scroll">
           <table class="pnl-table compact">
-            <thead><tr><th scope="col">Жоба</th><th v-for="m in history.months" :key="m" scope="col">{{ periodLabel(m, true) }}</th></tr></thead>
+            <thead><tr><th scope="col">{{ t("Жоба") }}</th><th v-for="m in history.months" :key="m" scope="col">{{ periodLabel(m, true) }}</th></tr></thead>
             <tbody>
               <tr v-for="r in history.list" :key="r.project.id">
                 <th scope="row"><i :style="{ background: finance.colorOf(r.project.id) }" />{{ r.project.name }}</th>
                 <td v-for="(c, i) in r.cells" :key="i">{{ c ? compactMoney(c.spendKzt) : "—" }}</td>
               </tr>
               <tr class="pnl-total">
-                <th scope="row">Барлығы</th>
-                <td v-for="(t, i) in history.totals" :key="i"><b>{{ t ? compactMoney(t) : "—" }}</b></td>
+                <th scope="row">{{ t("Барлығы") }}</th>
+                <td v-for="(total, i) in history.totals" :key="i"><b>{{ total ? compactMoney(total) : "—" }}</b></td>
               </tr>
             </tbody>
           </table>
         </div>
       </template>
 
-      <h3 class="meta-subhead">{{ periodLabel(period) }} — күндер бойынша</h3>
+      <h3 class="meta-subhead">{{ periodLabel(period) }} — {{ t("күндер бойынша") }}</h3>
       <ChartColumns
-        caption="Күндік таргет шығыны, теңге" :labels="daily.labels" :details="daily.details"
+        :caption="t('Күндік таргет шығыны, теңге')" :labels="daily.labels" :details="daily.details"
         :series="daily.series" :format="money" :axis-format="compactMoney" :height="200"
       />
 
-      <h3 v-if="regions.length" class="meta-subhead">Өңірлер бойынша — ақша қайда кетті</h3>
+      <h3 v-if="regions.length" class="meta-subhead">{{ t("Өңірлер бойынша — ақша қайда кетті") }}</h3>
       <div v-if="regions.length" class="table-scroll">
         <table class="pnl-table compact">
-          <thead><tr><th scope="col">Өңір</th><th scope="col">Шығын</th><th scope="col">Үлесі</th><th scope="col">Жоба</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("Өңір") }}</th><th scope="col">{{ t("Шығын") }}</th><th scope="col">{{ t("Үлесі") }}</th><th scope="col">{{ t("Жоба") }}</th></tr></thead>
           <tbody>
             <tr v-for="r in visibleRegions" :key="r.region">
-              <th scope="row">{{ regionLabel(r.region) }}</th>
+              <th scope="row">{{ t(regionLabel(r.region)) }}</th>
               <td>$ {{ formatCount(r.spend, 2) }}</td>
               <td>{{ formatPercent(r.share) }}</td>
               <td>
                 <select :value="r.rule?.builtin === false ? (r.rule?.projectId ?? '') : 'auto'" :disabled="busy" @change="setRegion(r.region, ($event.target as HTMLSelectElement).value)">
-                  <option value="auto">Автоматты{{ r.rule?.projectId ? ` — ${finance.nameOf(r.rule.projectId)}` : "" }}</option>
+                  <option value="auto">{{ t("Автоматты") }}{{ r.rule?.projectId ? ` — ${finance.nameOf(r.rule.projectId)}` : "" }}</option>
                   <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-                  <option value="">Жобасыз (есепке кірмейді)</option>
+                  <option value="">{{ t("Жобасыз (есепке кірмейді)") }}</option>
                 </select>
               </td>
             </tr>
@@ -363,66 +375,59 @@ const clearToken = () => run("Токен", async () => {
         </table>
       </div>
       <button v-if="regions.length > 8" type="button" class="text-button" @click="showAllRegions = !showAllRegions">
-        {{ showAllRegions ? "Тек негізгілерін көрсету" : `Барлық ${regions.length} өңірді көрсету` }}
+        {{ showAllRegions ? t("Тек негізгілерін көрсету") : `${t("Барлық")} ${regions.length} ${t("өңірді көрсету")}` }}
       </button>
       <p class="panel-footnote">
         <template v-if="splitByRegion.length">
-          {{ splitByRegion.map(a => a.name).join(", ") }} — өңірлер бойынша бөлінеді: Meta-ның өз дерегі,
-          сондықтан жобалардың қосындысы кабинеттің сомасына тиынына дейін тең. Жамбыл → Тараз,
-          Қызылорда → Қызылорда, қалғаны негізгі жобаға (онлайн сатылым сол жерде есептеледі).
-          Кез келген өңірді қолмен ауыстыруға болады.
+          {{ splitByRegion.map(a => a.name).join(", ") }} — {{ t("өңірлер бойынша бөлінеді: Meta-ның өз дерегі, сондықтан жобалардың қосындысы кабинеттің сомасына тиынына дейін тең. Жамбыл → Тараз, Қызылорда → Қызылорда, қалғаны негізгі жобаға (онлайн сатылым сол жерде есептеледі). Кез келген өңірді қолмен ауыстыруға болады.") }}
         </template>
         <template v-else>
-          Әр жобаның өз кабинеті бар, сондықтан шығын кабинет бойынша бөлінеді — бұл дәл әдіс.
-          Бұл кесте ақшаның қай өңірге кеткенін көрсетеді, бөлуге әсер етпейді. Бір кабинетті
-          бірнеше жобаға бөлу керек болса, «Кабинеттер» бөлімінен «Өңірлер бойынша бөлу» деп қойыңыз.
+          {{ t("Әр жобаның өз кабинеті бар, сондықтан шығын кабинет бойынша бөлінеді — бұл дәл әдіс. Бұл кесте ақшаның қай өңірге кеткенін көрсетеді, бөлуге әсер етпейді. Бір кабинетті бірнеше жобаға бөлу керек болса, «Кабинеттер» бөлімінен «Өңірлер бойынша бөлу» деп қойыңыз.") }}
         </template>
       </p>
     </template>
-    <p v-else-if="token?.present" class="meta-note">Бұл айға дерек жоқ. «Жаңарту» батырмасын басып, кабинеттен тартыңыз.</p>
+    <p v-else-if="token?.present" class="meta-note">{{ t("Бұл айға дерек жоқ. «Жаңарту» батырмасын басып, кабинеттен тартыңыз.") }}</p>
 
     <details class="meta-settings">
-      <summary>Кабинеттер және токендер</summary>
+      <summary>{{ t("Кабинеттер және токендер") }}</summary>
       <div v-if="tokenList.length" class="table-scroll">
         <table class="pnl-table compact">
-          <thead><tr><th scope="col">Токен</th><th scope="col">Түрі</th><th scope="col">Мерзімі</th><th scope="col">Қандай бизнесті көреді</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("Токен") }}</th><th scope="col">{{ t("Түрі") }}</th><th scope="col">{{ t("Мерзімі") }}</th><th scope="col">{{ t("Қандай бизнесті көреді") }}</th></tr></thead>
           <tbody>
-            <tr v-for="t in tokenList" :key="t.hint">
-              <th scope="row">…{{ t.hint }}<small v-if="t.missing.length">рұқсат жоқ: {{ t.missing.join(", ") }}</small></th>
-              <td>{{ t.kind }}</td>
-              <td :class="t.tone === 'bad' ? 'negative' : t.tone === 'warn' ? 'warn' : 'positive'">{{ t.text }}</td>
-              <td>{{ t.businesses.length ? t.businesses.join(", ") : "—" }}<small class="cell-sub">{{ t.accounts }} кабинет</small></td>
+            <tr v-for="tok in tokenList" :key="tok.hint">
+              <th scope="row">…{{ tok.hint }}<small v-if="tok.missing.length">{{ t("рұқсат жоқ:") }} {{ tok.missing.join(", ") }}</small></th>
+              <td>{{ tok.kind }}</td>
+              <td :class="tok.tone === 'bad' ? 'negative' : tok.tone === 'warn' ? 'warn' : 'positive'">{{ tok.text }}</td>
+              <td>{{ tok.businesses.length ? tok.businesses.join(", ") : "—" }}<small class="cell-sub">{{ tok.accounts }} {{ t("кабинет") }}</small></td>
             </tr>
           </tbody>
         </table>
       </div>
       <form class="meta-token-form" @submit.prevent="storeToken">
         <label class="form-field">
-          <span>Токен қосу немесе ауыстыру</span>
-          <textarea v-model="tokenDraft" rows="2" placeholder="EAA… — бірнешеуін үтірмен қатар қоюға болады" spellcheck="false" />
+          <span>{{ t("Токен қосу немесе ауыстыру") }}</span>
+          <textarea v-model="tokenDraft" rows="2" :placeholder="t('EAA… — бірнешеуін үтірмен қатар қоюға болады')" spellcheck="false" />
           <small>
-            Токен шифрланып сақталады және сайтта бірден жұмыс істейді — серверге кірудің қажеті жоқ.
-            Бір жүйелік пайдаланушы бір бизнеске тиесілі, сондықтан кабинеттер бірнеше бизнесте болса,
-            әр бизнеске бір токен қойыңыз.
+            {{ t("Токен шифрланып сақталады және сайтта бірден жұмыс істейді — серверге кірудің қажеті жоқ. Бір жүйелік пайдаланушы бір бизнеске тиесілі, сондықтан кабинеттер бірнеше бизнесте болса, әр бизнеске бір токен қойыңыз.") }}
           </small>
         </label>
         <div class="meta-token-actions">
-          <button type="submit" class="text-button" :disabled="busy || !tokenDraft.trim()"><Check :size="14" /> Сақтау</button>
-          <button v-if="tokenList.length" type="button" class="text-button danger" :disabled="busy" @click="clearToken">Өшіру</button>
+          <button type="submit" class="text-button" :disabled="busy || !tokenDraft.trim()"><Check :size="14" /> {{ t("Сақтау") }}</button>
+          <button v-if="tokenList.length" type="button" class="text-button danger" :disabled="busy" @click="clearToken">{{ t("Өшіру") }}</button>
         </div>
       </form>
       <div v-if="spending.length" class="table-scroll">
         <table class="pnl-table compact">
-          <thead><tr><th scope="col">Кабинет</th><th scope="col">Дерек</th><th scope="col">Қалай бөлінеді</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("Кабинет") }}</th><th scope="col">{{ t("Дерек") }}</th><th scope="col">{{ t("Қалай бөлінеді") }}</th></tr></thead>
           <tbody>
             <tr v-for="a in spending" :key="a.id">
               <th scope="row">{{ a.name }}<small>{{ a.currency }} · {{ a.id }}</small></th>
-              <td>{{ a.days }} күн<small class="cell-sub">{{ a.firstDate }} → {{ a.lastDate }}</small></td>
+              <td>{{ a.days }} {{ t("күн") }}<small class="cell-sub">{{ a.firstDate }} → {{ a.lastDate }}</small></td>
               <td>
                 <select :value="a.splitMode === 'region' ? 'region' : (a.projectId ?? '')" :disabled="busy" @change="setSplit(a.id, ($event.target as HTMLSelectElement).value)">
-                  <option value="">Шешілмеген — есепке кірмейді</option>
-                  <option value="region">Өңірлер бойынша бөлу</option>
-                  <option v-for="p in projects" :key="p.id" :value="p.id">Толығымен: {{ p.name }}</option>
+                  <option value="">{{ t("Шешілмеген — есепке кірмейді") }}</option>
+                  <option value="region">{{ t("Өңірлер бойынша бөлу") }}</option>
+                  <option v-for="p in projects" :key="p.id" :value="p.id">{{ t("Толығымен:") }} {{ p.name }}</option>
                 </select>
               </td>
             </tr>
@@ -430,9 +435,7 @@ const clearToken = () => run("Токен", async () => {
         </table>
       </div>
       <p class="panel-footnote">
-        Теңге сомасы ҚР Ұлттық Банкінің сол күнгі ресми бағамымен есептеледі — әр күн өз бағамымен,
-        себебі бағам жыл ішінде айтарлықтай өзгереді. Кабинеттің шығыны реестрдегі қолмен жазылған
-        «Таргет» сомасын ауыстырады, екеуі қосылмайды.
+        {{ t("Теңге сомасы ҚР Ұлттық Банкінің сол күнгі ресми бағамымен есептеледі — әр күн өз бағамымен, себебі бағам жыл ішінде айтарлықтай өзгереді. Кабинеттің шығыны реестрдегі қолмен жазылған «Таргет» сомасын ауыстырады, екеуі қосылмайды.") }}
       </p>
     </details>
   </section>

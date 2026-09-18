@@ -20,7 +20,7 @@ export function useMeta() {
       const next = await $fetch<MetaData>("/api/meta", { query: { period: period.value, months: months.value } });
       if (current === sequence) { data.value = next; error.value = ""; }
     } catch (e) {
-      if (current === sequence) error.value = messageOf(e, "Meta деректері жүктелмеді.");
+      if (current === sequence) error.value = useLocale().t(messageOf(e, "Meta деректері жүктелмеді."));
     } finally {
       if (current === sequence) loading.value = false;
     }

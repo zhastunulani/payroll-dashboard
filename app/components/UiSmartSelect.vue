@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean;
 }>(), { label: "", placeholder: "Таңдаңыз", searchPlaceholder: "Іздеу" });
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
+const { t } = useLocale();
 const open = ref(false);
 const query = ref("");
 const root = ref<HTMLElement | null>(null);
@@ -37,18 +38,18 @@ onBeforeUnmount(() => document.removeEventListener("mousedown", closeOnOutside))
 <template>
   <div ref="root" class="smart-select" :class="{ open, disabled }">
     <button type="button" class="smart-select-trigger" :disabled="disabled" @click="open = !open">
-      <span><small v-if="label">{{ label }}</small><strong>{{ selected?.label || placeholder }}</strong></span>
+      <span><small v-if="label">{{ t(label) }}</small><strong>{{ selected?.label || t(placeholder) }}</strong></span>
       <ChevronDown :size="17" />
     </button>
     <div v-if="open" class="smart-select-menu">
-      <div class="mobile-sheet-title"><strong>{{ label || "Таңдау" }}</strong><button type="button" @click="open = false"><X :size="19" /></button></div>
-      <label class="smart-select-search"><Search :size="16" /><input v-model="query" :placeholder="searchPlaceholder" autofocus /></label>
+      <div class="mobile-sheet-title"><strong>{{ label ? t(label) : t("Таңдау") }}</strong><button type="button" :aria-label="t('Жабу')" @click="open = false"><X :size="19" /></button></div>
+      <label class="smart-select-search"><Search :size="16" /><input v-model="query" :placeholder="t(searchPlaceholder)" autofocus /></label>
       <div class="smart-select-options">
         <button v-for="option in filtered" :key="option.value" type="button" :class="{ selected: option.value === modelValue }" @click="choose(option.value)">
           <span><strong>{{ option.label }}</strong><small v-if="option.description">{{ option.description }}</small></span>
           <Check v-if="option.value === modelValue" :size="17" />
         </button>
-        <p v-if="!filtered.length">Сәйкес нәтиже табылмады</p>
+        <p v-if="!filtered.length">{{ t("Сәйкес нәтиже табылмады") }}</p>
       </div>
     </div>
     <div v-if="open" class="smart-select-scrim" @click="open = false" />

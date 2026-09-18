@@ -57,7 +57,8 @@ test("a new month starts with blank employee notes", () => {
 
 test("employee notes have a visible quick editor in the Nuxt department table", () => {
   assert.match(app, /class="note-button"/);
-  assert.match(app, /Пікір қосу/);
+  assert.match(app, /t\("Пікір қосу"\)/);
   assert.match(app, /payroll\.mutate\("saveEmployeeNote"/);
-  assert.match(app, /placeholder="Мысалы: 50% берілді"/);
+  // Interface text is wrapped in t() for the Russian translation, so the placeholder is a binding now.
+  assert.match(app, /:placeholder="t\('Мысалы: 50% берілді'\)"/);
 });

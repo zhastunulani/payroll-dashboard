@@ -589,7 +589,9 @@ export function trendPoint(period: string, entries: FinanceEntry[], metrics: Fin
 export type FinanceIssue = {
   level: "critical" | "warning" | "info";
   code: string;
+  /** May carry «{n}», which the interface replaces with `count` after translating the sentence. */
   text: string;
+  count?: number;
   amount?: number;
 };
 
@@ -598,10 +600,10 @@ export function financeIssues(summary: FinanceSummary, metrics: FinanceMetrics, 
   const issues: FinanceIssue[] = [];
   if (!opts.payrollMonth) issues.push({ level: "warning", code: "no-payroll-month", text: "Бұл ай ашылмаған: айлық пен міндетті төлемдер әлі жоқ." });
   if (summary.payroll.unpaid > 0) {
-    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-salary", text: `${summary.payroll.unpaidPeople} адамның айлығы төленбеген`, amount: summary.payroll.unpaid });
+    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-salary", text: "{n} адамның айлығы төленбеген", count: summary.payroll.unpaidPeople, amount: summary.payroll.unpaid });
   }
   if (summary.kinds.mandatory.unpaid > 0) {
-    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-mandatory", text: `${summary.kinds.mandatory.unpaidCount} міндетті төлем төленбеген`, amount: summary.kinds.mandatory.unpaid });
+    issues.push({ level: opts.closed ? "critical" : "warning", code: "unpaid-mandatory", text: "{n} міндетті төлем төленбеген", count: summary.kinds.mandatory.unpaidCount, amount: summary.kinds.mandatory.unpaid });
   }
   const otherOwed = sum([summary.kinds.target.unpaid, summary.kinds.other.unpaid]);
   if (otherOwed > 0) issues.push({ level: "warning", code: "unpaid-other", text: "Реестрде «төленуі керек» деп белгіленген шығын бар", amount: otherOwed });
@@ -610,9 +612,9 @@ export function financeIssues(summary: FinanceSummary, metrics: FinanceMetrics, 
   if (summary.marketing && metrics.customers === null) issues.push({ level: "warning", code: "no-customers", text: "Жаңа ақылы клиенттер саны жоқ — CAC белгісіз." });
   if (!summary.marketing && metrics.leads) issues.push({ level: "warning", code: "leads-without-spend", text: "Лидтер бар, бірақ таргет шығыны тіркелмеген." });
   if (summary.revenue !== null && metrics.units === null) issues.push({ level: "warning", code: "no-units", text: "Оқушы / клиент саны жоқ — ARPU және юнит маржасы есептелмейді." });
-  if (summary.review > 0) issues.push({ level: "warning", code: "review", text: `${summary.review} жазба нақтылауды күтіп тұр (жиынға кірмейді).` });
-  if (summary.missingAmounts > 0) issues.push({ level: "warning", code: "missing-amount", text: `${summary.missingAmounts} жазбаның сомасы жоқ.` });
+  if (summary.review > 0) issues.push({ level: "warning", code: "review", text: "{n} жазба нақтылауды күтіп тұр (жиынға кірмейді).", count: summary.review });
+  if (summary.missingAmounts > 0) issues.push({ level: "warning", code: "missing-amount", text: "{n} жазбаның сомасы жоқ.", count: summary.missingAmounts });
   if (summary.tax === null && summary.groups.payroll > 0) issues.push({ level: "info", code: "no-tax", text: "Салық пен аударымдар енгізілмеген — нәтиже салыққа дейін." });
-  if (summary.otherCount > 0) issues.push({ level: "info", code: "other-category", text: `${summary.otherCount} жазба «Басқа шығын» санатында — жіктеу ұсынылады.` });
+  if (summary.otherCount > 0) issues.push({ level: "info", code: "other-category", text: "{n} жазба «Басқа шығын» санатында — жіктеу ұсынылады.", count: summary.otherCount });
   return issues;
 }

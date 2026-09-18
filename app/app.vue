@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const payroll = usePayroll();
 const route = useRoute();
+const { t } = useLocale();
 
 onMounted(() => {
   // A link from the reports (?workspace=&month=) opens that payroll profile and month directly.
@@ -15,8 +16,8 @@ onMounted(() => {
     <main v-if="payroll.authenticated.value === null" class="boot-screen">
       <div class="brand-symbol">A</div>
       <div class="boot-copy">
-        <strong>Қаржылық жүйе ашылуда</strong>
-        <span>Айлық деректері жүктеліп жатыр…</span>
+        <strong>{{ t("Қаржылық жүйе ашылуда") }}</strong>
+        <span>{{ t("Айлық деректері жүктеліп жатыр…") }}</span>
       </div>
       <div class="boot-progress"><i /></div>
     </main>

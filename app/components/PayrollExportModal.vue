@@ -5,6 +5,7 @@ import { buildPayrollStatement, buildPayrollStatementSheet, payrollStatementFile
 const emit = defineEmits<{ close: [] }>();
 const payroll = usePayroll();
 const { formatMoney } = useFormatters();
+const { t } = useLocale();
 const selectedIds = ref(new Set<string>());
 const exporting = ref(false);
 const exportError = ref("");
@@ -48,7 +49,7 @@ async function exportExcel() {
     });
     emit("close");
   } catch (error) {
-    exportError.value = error instanceof Error ? error.message : "Excel файлын жасау мүмкін болмады.";
+    exportError.value = error instanceof Error ? error.message : t("Excel файлын жасау мүмкін болмады.");
   } finally {
     exporting.value = false;
   }
@@ -56,33 +57,33 @@ async function exportExcel() {
 </script>
 
 <template>
-  <UiModal title="Төлем ведомосы" :description="`${data?.selectedMonth.label || ''} · Excel экспорты`" wide @close="emit('close')">
+  <UiModal :title="t('Төлем ведомосы')" :description="`${data ? monthName(data.selectedMonth) : ''} · ${t('Excel экспорты')}`" wide @close="emit('close')">
     <div class="export-workspace">
       <section class="export-summary">
         <span><FileSpreadsheet :size="23" /></span>
-        <div><small>Таңдалған есеп</small><strong>{{ data?.selectedWorkspace.name }} · {{ data?.selectedMonth.label }}</strong><em>Excel-де нақты төленетін қорытынды сома көрсетіледі</em></div>
-        <div><small>Қызметкерлер</small><strong>{{ statement?.employeeCount || 0 }}</strong></div>
-        <div class="amount"><small>Төленетін сома</small><strong>{{ formatMoney(statement?.payableAmount || 0) }}</strong></div>
+        <div><small>{{ t("Таңдалған есеп") }}</small><strong>{{ data?.selectedWorkspace.name }} · {{ data ? monthName(data.selectedMonth) : "" }}</strong><em>{{ t("Excel-де нақты төленетін қорытынды сома көрсетіледі") }}</em></div>
+        <div><small>{{ t("Қызметкерлер") }}</small><strong>{{ statement?.employeeCount || 0 }}</strong></div>
+        <div class="amount"><small>{{ t("Төленетін сома") }}</small><strong>{{ formatMoney(statement?.payableAmount || 0) }}</strong></div>
       </section>
 
       <div class="export-selector-heading">
-        <div><span class="eyebrow">Экспорт құрамы</span><h3>Қажетті бөлімдерді таңдаңыз</h3><p>Тек белгіленген бөлімдер Excel ведомосына қосылады.</p></div>
-        <button class="button subtle" type="button" @click="toggleAll"><Check :size="16" /> {{ allSelected ? "Барлығын алып тастау" : "Барлығын таңдау" }}</button>
+        <div><span class="eyebrow">{{ t("Экспорт құрамы") }}</span><h3>{{ t("Қажетті бөлімдерді таңдаңыз") }}</h3><p>{{ t("Тек белгіленген бөлімдер Excel ведомосына қосылады.") }}</p></div>
+        <button class="button subtle" type="button" @click="toggleAll"><Check :size="16" /> {{ allSelected ? t("Барлығын алып тастау") : t("Барлығын таңдау") }}</button>
       </div>
 
       <div class="export-department-grid">
         <button v-for="department in departments" :key="department.id" type="button" :class="{ selected: selectedIds.has(department.id) }" @click="toggleDepartment(department.id)">
           <i><Check v-if="selectedIds.has(department.id)" :size="15" /></i>
-          <span><strong>{{ department.name }}</strong><small><UsersRound :size="13" /> {{ department.employees.length }} қызметкер</small></span>
+          <span><strong>{{ department.name }}</strong><small><UsersRound :size="13" /> {{ department.employees.length }} {{ t("қызметкер") }}</small></span>
           <b>{{ formatMoney(department.total) }}</b>
         </button>
       </div>
 
       <div v-if="exportError" class="form-alert">{{ exportError }}</div>
-      <div v-if="!departments.length" class="empty-state"><span><Building2 :size="25" /></span><strong>Экспорттайтын бөлім жоқ</strong><p>Алдымен бөлім мен қызметкерлерді қосыңыз.</p></div>
+      <div v-if="!departments.length" class="empty-state"><span><Building2 :size="25" /></span><strong>{{ t("Экспорттайтын бөлім жоқ") }}</strong><p>{{ t("Алдымен бөлім мен қызметкерлерді қосыңыз.") }}</p></div>
       <div class="modal-actions export-actions">
-        <button type="button" class="button ghost" @click="emit('close')">Болдырмау</button>
-        <button type="button" class="button primary" :disabled="exporting || !selectedIds.size" @click="exportExcel"><Download :size="17" /> {{ exporting ? "Excel дайындалуда…" : "Excel жүктеу" }}</button>
+        <button type="button" class="button ghost" @click="emit('close')">{{ t("Болдырмау") }}</button>
+        <button type="button" class="button primary" :disabled="exporting || !selectedIds.size" @click="exportExcel"><Download :size="17" /> {{ exporting ? t("Excel дайындалуда…") : t("Excel жүктеу") }}</button>
       </div>
     </div>
   </UiModal>

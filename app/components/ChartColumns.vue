@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   grouped?: boolean;
 }>(), { details: () => [], line: null, height: 260, grouped: false });
 
+const { t } = useLocale();
 const root = ref<HTMLElement | null>(null);
 const width = ref(640);
 const active = ref<number | null>(null);
@@ -104,12 +105,12 @@ const tooltipStyle = computed(() => {
         <span v-if="line"><i class="line-key" />{{ line.label }}</span>
       </div>
       <button type="button" class="chart-toggle" :aria-pressed="tableView" @click="tableView = !tableView">
-        <component :is="tableView ? BarChart3 : Table2" :size="15" />{{ tableView ? "График" : "Кесте" }}
+        <component :is="tableView ? BarChart3 : Table2" :size="15" />{{ tableView ? t("График") : t("Кесте") }}
       </button>
     </div>
     <div v-if="tableView" class="chart-table">
       <table>
-        <thead><tr><th>Ай</th><th v-for="s in series" :key="s.key">{{ s.label }}</th><th>Барлығы</th><th v-if="line">{{ line.label }}</th></tr></thead>
+        <thead><tr><th>{{ t("Ай") }}</th><th v-for="s in series" :key="s.key">{{ s.label }}</th><th>{{ t("Барлығы") }}</th><th v-if="line">{{ line.label }}</th></tr></thead>
         <tbody>
           <tr v-for="(label, i) in labels" :key="label + i">
             <th>{{ details[i] || label }}</th>
@@ -131,7 +132,7 @@ const tooltipStyle = computed(() => {
         <g v-for="(column, i) in columns" :key="i" :class="{ dim: active !== null && active !== i }">
           <path v-for="seg in column.segments" :key="seg.key" :d="segmentPath(seg)" :fill="seg.color" />
           <text v-if="column.total && !grouped" class="chart-cap" :x="cx(i)" :y="y(column.total) - 7" text-anchor="middle">{{ axisFormat(column.total) }}</text>
-          <text v-else-if="!column.total" class="chart-empty" :x="cx(i)" :y="y(0) - 8" text-anchor="middle">{{ band < 64 ? "—" : "дерек жоқ" }}</text>
+          <text v-else-if="!column.total" class="chart-empty" :x="cx(i)" :y="y(0) - 8" text-anchor="middle">{{ band < 64 ? "—" : t("дерек жоқ") }}</text>
           <text class="chart-x" :x="cx(i)" :y="height - 9" text-anchor="middle">{{ labels[i] }}</text>
         </g>
         <path v-if="linePath" class="chart-line" :d="linePath" />
@@ -148,7 +149,7 @@ const tooltipStyle = computed(() => {
       <div v-if="active !== null" class="chart-tooltip" :style="tooltipStyle" role="status">
         <strong>{{ details[active] || labels[active] }}</strong>
         <span v-for="s in series" :key="s.key"><i :style="{ background: s.color }" />{{ s.label }}<b>{{ format(s.values[active] ?? null) }}</b></span>
-        <span class="total">Барлығы<b>{{ format(totals[active] ?? null) }}</b></span>
+        <span class="total">{{ t("Барлығы") }}<b>{{ format(totals[active] ?? null) }}</b></span>
         <span v-if="line"><i class="line-key" />{{ line.label }}<b>{{ format(line.values[active] ?? null) }}</b></span>
       </div>
     </div>

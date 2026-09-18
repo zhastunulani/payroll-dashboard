@@ -3,6 +3,7 @@ import { X } from "lucide-vue-next";
 
 defineProps<{ title: string; description?: string; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
+const { t } = useLocale();
 
 onMounted(() => document.body.classList.add("modal-open"));
 onBeforeUnmount(() => document.body.classList.remove("modal-open"));
@@ -13,8 +14,8 @@ onBeforeUnmount(() => document.body.classList.remove("modal-open"));
     <div class="modal-backdrop" @mousedown.self="emit('close')">
       <section class="modal-card" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="title">
         <header>
-          <div><span class="eyebrow">Деректерді басқару</span><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
-          <button class="icon-button" type="button" aria-label="Жабу" @click="emit('close')"><X :size="20" /></button>
+          <div><span class="eyebrow">{{ t("Деректерді басқару") }}</span><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
+          <button class="icon-button" type="button" :aria-label="t('Жабу')" @click="emit('close')"><X :size="20" /></button>
         </header>
         <div class="modal-body"><slot /></div>
       </section>

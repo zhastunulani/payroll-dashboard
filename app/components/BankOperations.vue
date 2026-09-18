@@ -8,6 +8,7 @@ const props = defineProps<{ operations: BankOperation[]; projects: BankProject[]
 const project = defineModel<string>("project", { default: "all" });
 const emit = defineEmits<{ rule: [draft: Partial<BankRule>] }>();
 const bank = useBank();
+const { t } = useLocale();
 const NONE = "__none", WAITING = "__waiting";
 
 const type = ref<"all" | "sale" | "refund" | "other">("all");
@@ -38,7 +39,7 @@ const bulkProject = ref("");
 const busy = ref(false), error = ref("");
 async function run(action: () => Promise<unknown>) {
   busy.value = true; error.value = "";
-  try { await action(); } catch (e) { error.value = messageOf(e, "Сақтау орындалмады."); } finally { busy.value = false; }
+  try { await action(); } catch (e) { error.value = messageOf(e, t("Сақтау орындалмады.")); } finally { busy.value = false; }
 }
 function assignSelected() {
   if (!bulkProject.value) return;
@@ -77,25 +78,25 @@ const projectName = (id: string | null) => props.projects.find(p => p.id === id)
 const statementName = (id: string) => props.statements.find(s => s.id === id)?.fileName ?? "—";
 const day = (iso: string | null) => iso ? iso.split("-").reverse().join(".") : "—";
 const journalText = (entry: NonNullable<typeof journal.value>[number]) => {
-  if (entry.action === "comment") return `Пікір: «${entry.after?.comment ?? ""}»`;
-  const describe = (v: Record<string, unknown> | null) => v ? `${v.projectId ? projectName(String(v.projectId)) : ASSIGNMENT_LABELS[v.assignment as BankAssignment] ?? "—"}` : "—";
+  if (entry.action === "comment") return `${t("Пікір")}: «${entry.after?.comment ?? ""}»`;
+  const describe = (v: Record<string, unknown> | null) => v ? `${v.projectId ? projectName(String(v.projectId)) : t(ASSIGNMENT_LABELS[v.assignment as BankAssignment] ?? "—")}` : "—";
   return `${describe(entry.before)} → ${describe(entry.after)}${entry.note ? ` · ${entry.note}` : ""}`;
 };
 
 // Export of the filtered list
 const exportFields: [string, (o: BankOperation) => string | number | null][] = [
   ["Күні", o => day(o.date)], ["Уақыты", o => o.time], ["Шотқа түскен күні", o => day(o.creditedDate)], ["Банк", o => BANK_LABELS[o.bank]],
-  ["Заңды тұлға", o => o.legalEntity], ["БСН/ЖСН", o => o.legalEntityBin], ["Шот", o => o.account], ["Түрі", o => KIND_LABELS[o.kind]],
+  ["Заңды тұлға", o => o.legalEntity], ["БСН/ЖСН", o => o.legalEntityBin], ["Шот", o => o.account], ["Түрі", o => t(KIND_LABELS[o.kind])],
   ["Сомасы, ₸", o => o.amount], ["Комиссия, ₸", o => o.commission], ["ҚҚС (комиссияда)", o => o.vat], ["Салық", o => o.tax],
   ["Төлем тәсілі", o => o.paymentMethod], ["Арна", o => o.channel], ["Қала", o => detectCity(o.address) ?? ""], ["Мекенжай", o => o.address], ["Мақсаты / детальдары", o => o.purpose],
   ["Контрагент", o => o.counterparty], ["Операция №", o => o.operationNo], ["Транзакция №", o => o.transactionNo],
-  ["Жоба", o => o.projectId ? projectName(o.projectId) : ""], ["Бөлу күйі", o => ASSIGNMENT_LABELS[o.assignment]], ["Сверка", o => RECON_LABELS[o.reconStatus]],
+  ["Жоба", o => o.projectId ? projectName(o.projectId) : ""], ["Бөлу күйі", o => t(ASSIGNMENT_LABELS[o.assignment])], ["Сверка", o => t(RECON_LABELS[o.reconStatus])],
   ["Пікір", o => o.comment], ["Дереккөз файлы", o => statementName(o.statementId)],
 ];
 function exportCsv() {
   // Neutralize spreadsheet formula injection in text taken from bank files.
   const escape = (v: unknown) => `"${String(v ?? "").replace(/^[=+@-](?!\d)/, "'$&").replaceAll('"', '""')}"`;
-  const csv = String.fromCharCode(0xfeff) + [exportFields.map(f => f[0]), ...rows.value.map(o => exportFields.map(f => f[1](o)))].map(r => r.map(escape).join(";")).join("\r\n");
+  const csv = String.fromCharCode(0xfeff) + [exportFields.map(f => t(f[0])), ...rows.value.map(o => exportFields.map(f => f[1](o)))].map(r => r.map(escape).join(";")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url; a.download = `bank-operations-${bank.period.value}.csv`; a.click();
@@ -103,40 +104,40 @@ function exportCsv() {
 }
 async function exportExcel() {
   const { default: writeXlsxFile } = await import("write-excel-file");
-  const header = exportFields.map(f => ({ value: f[0], fontWeight: "bold" as const }));
+  const header = exportFields.map(f => ({ value: t(f[0]), fontWeight: "bold" as const }));
   const body = rows.value.map(o => exportFields.map(f => { const v = f[1](o); return v === null || v === "" ? null : { value: v, ...(typeof v === "number" ? { format: "#,##0.00" } : {}) }; }));
-  await writeXlsxFile([header, ...body], { fileName: `bank-operations-${bank.period.value}.xlsx`, sheet: "Операциялар", stickyRowsCount: 1 });
+  await writeXlsxFile([header, ...body], { fileName: `bank-operations-${bank.period.value}.xlsx`, sheet: t("Операциялар"), stickyRowsCount: 1 });
 }
 </script>
 
 <template>
   <section class="panel bank-ops">
     <div class="bank-ops-filters">
-      <nav class="bank-chips" aria-label="Жоба">
-        <button type="button" :class="{ active: project === 'all' }" @click="project = 'all'">Барлығы <b>{{ countIn("all") }}</b></button>
+      <nav class="bank-chips" :aria-label="t('Жоба')">
+        <button type="button" :class="{ active: project === 'all' }" @click="project = 'all'">{{ t("Барлығы") }} <b>{{ countIn("all") }}</b></button>
         <button v-for="p in projects" :key="p.id" type="button" :class="{ active: project === p.id }" :style="{ '--chip': colorOf(p.id) }" @click="project = p.id"><i />{{ p.name }} <b>{{ countIn(p.id) }}</b></button>
-        <button type="button" class="warn" :class="{ active: project === WAITING }" @click="project = WAITING">Бөлу керек <b>{{ countIn(WAITING) }}</b></button>
-        <button type="button" :class="{ active: project === NONE }" @click="project = NONE">Жобаға қатысы жоқ <b>{{ countIn(NONE) }}</b></button>
+        <button type="button" class="warn" :class="{ active: project === WAITING }" @click="project = WAITING">{{ t("Бөлу керек") }} <b>{{ countIn(WAITING) }}</b></button>
+        <button type="button" :class="{ active: project === NONE }" @click="project = NONE">{{ t("Жобаға қатысы жоқ") }} <b>{{ countIn(NONE) }}</b></button>
       </nav>
       <div class="bank-ops-row">
-        <div class="segmented bank-type" role="group" aria-label="Түрі">
-          <button type="button" :class="{ active: type === 'all' }" @click="type = 'all'">Барлығы</button>
-          <button type="button" :class="{ active: type === 'sale' }" @click="type = 'sale'">Түсім</button>
-          <button type="button" :class="{ active: type === 'refund' }" @click="type = 'refund'">Қайтарым</button>
-          <button type="button" :class="{ active: type === 'other' }" @click="type = 'other'">Комиссия, басқа</button>
+        <div class="segmented bank-type" role="group" :aria-label="t('Түрі')">
+          <button type="button" :class="{ active: type === 'all' }" @click="type = 'all'">{{ t("Барлығы") }}</button>
+          <button type="button" :class="{ active: type === 'sale' }" @click="type = 'sale'">{{ t("Түсім") }}</button>
+          <button type="button" :class="{ active: type === 'refund' }" @click="type = 'refund'">{{ t("Қайтарым") }}</button>
+          <button type="button" :class="{ active: type === 'other' }" @click="type = 'other'">{{ t("Комиссия, басқа") }}</button>
         </div>
-        <label class="search-field"><Search :size="16" /><input v-model="search" placeholder="Іздеу: сома, мекенжай, операция №"></label>
+        <label class="search-field"><Search :size="16" /><input v-model="search" :placeholder="t('Іздеу: сома, мекенжай, операция №')"></label>
         <div class="ledger-actions"><button class="button secondary" type="button" @click="exportExcel"><ArrowDownToLine :size="16" /> Excel</button><button class="button secondary" type="button" @click="exportCsv"><ArrowDownToLine :size="16" /> CSV</button></div>
       </div>
-      <span class="bank-list-head">{{ rows.length }} операция · түсім {{ money(totals.turnover) }} · комиссия {{ money(totals.commission) }}</span>
+      <span class="bank-list-head">{{ rows.length }} {{ t("операция") }} · {{ t("түсім") }} {{ money(totals.turnover) }} · комиссия {{ money(totals.commission) }}</span>
     </div>
 
     <div v-if="selected.size" class="selection-bar active bank-bulk">
-      <div><strong>{{ selected.size }} таңдалды</strong>
-        <select v-model="bulkProject" aria-label="Қай жобаға"><option value="">Жобаны таңдаңыз…</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option><option :value="NONE">Жобаға қатысы жоқ</option></select>
-        <button type="button" :disabled="!bulkProject || busy" @click="assignSelected">Бөлу</button>
-        <button type="button" :disabled="busy" @click="resetSelected"><RotateCcw :size="14" /> Ережеге қайтару</button>
-        <button type="button" @click="selected = new Set()"><X :size="14" /> Болдырмау</button>
+      <div><strong>{{ selected.size }} {{ t("таңдалды") }}</strong>
+        <select v-model="bulkProject" :aria-label="t('Қай жобаға')"><option value="">{{ t("Жобаны таңдаңыз…") }}</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option><option :value="NONE">{{ t("Жобаға қатысы жоқ") }}</option></select>
+        <button type="button" :disabled="!bulkProject || busy" @click="assignSelected">{{ t("Бөлу") }}</button>
+        <button type="button" :disabled="busy" @click="resetSelected"><RotateCcw :size="14" /> {{ t("Ережеге қайтару") }}</button>
+        <button type="button" @click="selected = new Set()"><X :size="14" /> {{ t("Болдырмау") }}</button>
       </div>
     </div>
     <p v-if="error" class="finance-error" role="alert">{{ error }}</p>
@@ -145,53 +146,53 @@ async function exportExcel() {
       <table class="bank-table">
         <thead>
           <tr>
-            <th><input type="checkbox" :checked="allShownSelected" aria-label="Көрінгеннің бәрін таңдау" @change="toggleShown"></th>
-            <th>Күні</th><th class="num">Сомасы</th><th class="num">Комиссия</th><th>Түрі · тәсілі</th><th>Қайдан</th><th>Жоба</th><th />
+            <th><input type="checkbox" :checked="allShownSelected" :aria-label="t('Көрінгеннің бәрін таңдау')" @change="toggleShown"></th>
+            <th>{{ t("Күні") }}</th><th class="num">{{ t("Сомасы") }}</th><th class="num">Комиссия</th><th>{{ t("Түрі · тәсілі") }}</th><th>{{ t("Қайдан") }}</th><th>{{ t("Жоба") }}</th><th />
           </tr>
         </thead>
         <tbody>
           <template v-for="op in shown" :key="op.id">
             <tr :class="{ waiting: needsAssignment(op), selected: selected.has(op.id) }">
-              <td><input type="checkbox" :checked="selected.has(op.id)" :aria-label="`${op.operationNo} таңдау`" @change="toggle(op.id)"></td>
-              <td class="nowrap">{{ day(op.date) }}<small>{{ op.time || (op.creditedDate ? `түсті ${day(op.creditedDate)}` : "") }}</small></td>
+              <td><input type="checkbox" :checked="selected.has(op.id)" :aria-label="`${op.operationNo} ${t('таңдау')}`" @change="toggle(op.id)"></td>
+              <td class="nowrap">{{ day(op.date) }}<small>{{ op.time || (op.creditedDate ? `${t("түсті")} ${day(op.creditedDate)}` : "") }}</small></td>
               <td class="num" :class="{ negative: op.amount < 0 }">{{ money(op.amount) }}</td>
               <td class="num muted">{{ op.commission ? money(op.commission) : "—" }}</td>
-              <td>{{ KIND_LABELS[op.kind] }}<small>{{ op.paymentMethod }}{{ op.channel && op.bank === "kaspi" ? ` · ${op.channel}` : "" }}</small></td>
+              <td>{{ t(KIND_LABELS[op.kind]) }}<small>{{ t(op.paymentMethod) }}{{ op.channel && op.bank === "kaspi" ? ` · ${op.channel}` : "" }}</small></td>
               <td class="where"><span>{{ whereOf(op) }}</span><small>{{ op.legalEntity }} · {{ BANK_LABELS[op.bank] }}</small></td>
               <td>
-                <select class="project-select" :value="projectValue(op)" :disabled="busy || op.assignment === 'duplicate'" :aria-label="`${op.operationNo}: жоба`" @change="assignOne(op, ($event.target as HTMLSelectElement).value)">
-                  <option value="" disabled>{{ op.suggestedProjectId ? `Ұсыныс: ${projectName(op.suggestedProjectId)}` : "Таңдаңыз…" }}</option>
+                <select class="project-select" :value="projectValue(op)" :disabled="busy || op.assignment === 'duplicate'" :aria-label="`${op.operationNo}: ${t('жоба')}`" @change="assignOne(op, ($event.target as HTMLSelectElement).value)">
+                  <option value="" disabled>{{ op.suggestedProjectId ? `${t("Ұсыныс")}: ${projectName(op.suggestedProjectId)}` : t("Таңдаңыз…") }}</option>
                   <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-                  <option :value="NONE">Жобаға қатысы жоқ</option>
+                  <option :value="NONE">{{ t("Жобаға қатысы жоқ") }}</option>
                 </select>
-                <small class="bank-state-text" :class="op.assignment">{{ ASSIGNMENT_LABELS[op.assignment] }}</small>
+                <small class="bank-state-text" :class="op.assignment">{{ t(ASSIGNMENT_LABELS[op.assignment]) }}</small>
               </td>
-              <td><button class="icon-button" type="button" :aria-expanded="open === op.id" aria-label="Толығырақ" @click="expand(op)"><ChevronDown :size="16" :class="{ flipped: open === op.id }" /></button></td>
+              <td><button class="icon-button" type="button" :aria-expanded="open === op.id" :aria-label="t('Толығырақ')" @click="expand(op)"><ChevronDown :size="16" :class="{ flipped: open === op.id }" /></button></td>
             </tr>
             <tr v-if="open === op.id" class="bank-detail-row">
               <td colspan="8">
                 <div class="bank-detail">
                   <dl>
-                    <div><dt>Мақсаты / детальдары</dt><dd>{{ op.purpose || "—" }}</dd></div>
+                    <div><dt>{{ t("Мақсаты / детальдары") }}</dt><dd>{{ op.purpose || "—" }}</dd></div>
                     <div><dt>Контрагент</dt><dd>{{ op.counterparty || "—" }}</dd></div>
-                    <div><dt>Мекенжай</dt><dd>{{ op.address || "—" }}</dd></div>
-                    <div><dt>Заңды тұлға</dt><dd>{{ op.legalEntity }} · {{ op.legalEntityBin }}{{ op.account ? ` · ${op.account}` : "" }}</dd></div>
+                    <div><dt>{{ t("Мекенжай") }}</dt><dd>{{ op.address || "—" }}</dd></div>
+                    <div><dt>{{ t("Заңды тұлға") }}</dt><dd>{{ op.legalEntity }} · {{ op.legalEntityBin }}{{ op.account ? ` · ${op.account}` : "" }}</dd></div>
                     <div><dt>Операция № / транзакция №</dt><dd>{{ op.operationNo || "—" }} / {{ op.transactionNo || "—" }}</dd></div>
-                    <div><dt>Комиссия / ҚҚС / салық</dt><dd>{{ money(op.commission) }} / {{ op.vat === null ? "—" : money(op.vat) }} / {{ op.tax === null ? "көрсетілмеген" : money(op.tax) }}</dd></div>
-                    <div><dt>Сверка</dt><dd>{{ RECON_LABELS[op.reconStatus] }}</dd></div>
-                    <div><dt>Дереккөз</dt><dd>{{ statementName(op.statementId) }}</dd></div>
+                    <div><dt>{{ t("Комиссия / ҚҚС / салық") }}</dt><dd>{{ money(op.commission) }} / {{ op.vat === null ? "—" : money(op.vat) }} / {{ op.tax === null ? t("көрсетілмеген") : money(op.tax) }}</dd></div>
+                    <div><dt>Сверка</dt><dd>{{ t(RECON_LABELS[op.reconStatus]) }}</dd></div>
+                    <div><dt>{{ t("Дереккөз") }}</dt><dd>{{ statementName(op.statementId) }}</dd></div>
                   </dl>
                   <div class="bank-detail-side">
-                    <label class="form-field"><span>Менеджер пікірі</span><textarea v-model="comment" rows="2" maxlength="1000" placeholder="Мысалы: Тамшылаб курсы, чек бойынша расталды" /></label>
+                    <label class="form-field"><span>{{ t("Менеджер пікірі") }}</span><textarea v-model="comment" rows="2" maxlength="1000" :placeholder="t('Мысалы: Тамшылаб курсы, чек бойынша расталды')" /></label>
                     <div class="ledger-actions">
-                      <button class="button secondary" type="button" :disabled="busy || comment === op.comment" @click="run(() => bank.comment(op.id, comment))">Пікірді сақтау</button>
-                      <button class="button secondary" type="button" @click="ruleFrom(op)"><Sparkles :size="15" /> Осыдан ереже жасау</button>
-                      <button v-if="op.assignment === 'manual' || op.assignment === 'excluded'" class="button ghost" type="button" :disabled="busy" @click="run(() => bank.resetToRules([op.id]))"><RotateCcw :size="15" /> Ережеге қайтару</button>
+                      <button class="button secondary" type="button" :disabled="busy || comment === op.comment" @click="run(() => bank.comment(op.id, comment))">{{ t("Пікірді сақтау") }}</button>
+                      <button class="button secondary" type="button" @click="ruleFrom(op)"><Sparkles :size="15" /> {{ t("Осыдан ереже жасау") }}</button>
+                      <button v-if="op.assignment === 'manual' || op.assignment === 'excluded'" class="button ghost" type="button" :disabled="busy" @click="run(() => bank.resetToRules([op.id]))"><RotateCcw :size="15" /> {{ t("Ережеге қайтару") }}</button>
                       <button class="button ghost" type="button" @click="loadJournal(op)"><History :size="15" /> Журнал</button>
                     </div>
                     <ul v-if="journal" class="bank-journal">
                       <li v-for="(entry, i) in journal" :key="i"><small>{{ entry.createdAt.slice(0, 16).replace("T", " ") }}</small>{{ journalText(entry) }}</li>
-                      <li v-if="!journal.length"><small>Өзгеріс болмаған</small></li>
+                      <li v-if="!journal.length"><small>{{ t("Өзгеріс болмаған") }}</small></li>
                     </ul>
                   </div>
                 </div>
@@ -201,7 +202,7 @@ async function exportExcel() {
         </tbody>
       </table>
     </div>
-    <p v-if="!rows.length" class="panel-empty">Сүзгі бойынша операция жоқ.</p>
-    <footer v-if="pages > 1" class="finance-pagination"><button class="button secondary" type="button" :disabled="page <= 1" @click="page--">Алдыңғы</button><span>{{ page }} / {{ pages }}</span><button class="button secondary" type="button" :disabled="page >= pages" @click="page++">Келесі</button></footer>
+    <p v-if="!rows.length" class="panel-empty">{{ t("Сүзгі бойынша операция жоқ.") }}</p>
+    <footer v-if="pages > 1" class="finance-pagination"><button class="button secondary" type="button" :disabled="page <= 1" @click="page--">{{ t("Алдыңғы") }}</button><span>{{ page }} / {{ pages }}</span><button class="button secondary" type="button" :disabled="page >= pages" @click="page++">{{ t("Келесі") }}</button></footer>
   </section>
 </template>

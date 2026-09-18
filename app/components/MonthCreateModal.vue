@@ -7,9 +7,10 @@ const props = defineProps<{ target?: string }>();
 const emit = defineEmits<{ close: [] }>();
 const payroll = usePayroll();
 const { formatMoney } = useFormatters();
+const { t } = useLocale();
 
 const months = computed(() => payroll.data.value?.months ?? []);
-const monthOptions = computed(() => months.value.map(item => ({ value: item.id, label: item.label, description: `${item.year} жыл · ${String(item.month).padStart(2, "0")} ай`, keywords: `${item.year} ${item.month}` })));
+const monthOptions = computed(() => months.value.map(item => ({ value: item.id, label: item.label, description: `${item.year} ${t("жыл")} · ${String(item.month).padStart(2, "0")} ${t("ай")}`, keywords: `${item.year} ${item.month}` })));
 // Copy from the closest earlier month by default: that is the last known team and payments.
 const sourceMonthId = ref(months.value.find(m => !props.target || m.id < props.target)?.id ?? months.value[0]?.id ?? "");
 const targetMonthId = ref(props.target ?? nextAvailableMonthId(sourceMonthId.value, months.value.map(m => m.id)));
@@ -44,21 +45,21 @@ async function create() {
 </script>
 
 <template>
-  <UiModal title="Жаңа есептік ай" :description="`${payroll.data.value?.selectedWorkspace.name ?? ''}: қызметкерлер мен ай сайынғы міндетті төлемдер таңдалған айдан көшіріледі`" wide @close="emit('close')">
+  <UiModal :title="t('Жаңа есептік ай')" :description="`${payroll.data.value?.selectedWorkspace.name ?? ''}: ${t('қызметкерлер мен ай сайынғы міндетті төлемдер таңдалған айдан көшіріледі')}`" wide @close="emit('close')">
     <form class="form-stack" @submit.prevent="create">
       <div class="form-grid two">
-        <label class="form-field"><span>Қай айдан көшіру</span><UiSmartSelect v-model="sourceMonthId" :options="monthOptions" search-placeholder="Айды іздеу" @update:model-value="loadPreview" /></label>
-        <label class="form-field"><span>Құрылатын ай</span><input v-model="targetMonthId" type="month" min="2020-01" max="2100-12" required /></label>
+        <label class="form-field"><span>{{ t("Қай айдан көшіру") }}</span><UiSmartSelect v-model="sourceMonthId" :options="monthOptions" :search-placeholder="t('Айды іздеу')" @update:model-value="loadPreview" /></label>
+        <label class="form-field"><span>{{ t("Құрылатын ай") }}</span><input v-model="targetMonthId" type="month" min="2020-01" max="2100-12" required /></label>
       </div>
-      <p v-if="exists" class="finance-error">Бұл ай бұрыннан бар.</p>
+      <p v-if="exists" class="finance-error">{{ t("Бұл ай бұрыннан бар.") }}</p>
       <div class="copy-summary" :class="{ loading: previewLoading }">
-        <div><span><UsersRound :size="19" /></span><small>Көшірілетін команда</small><strong>{{ copyableEmployees }} адам</strong><em>Кураторлар мен Сату бөлімі бос ашылады</em></div>
-        <div><span><WalletCards :size="19" /></span><small>Айлық қоры</small><strong>{{ formatMoney(copyableSalary) }}</strong></div>
-        <div><span><ReceiptText :size="19" /></span><small>Міндетті төлемдер</small><strong>{{ formatMoney(recurringExpenses.reduce((sum, item) => sum + item.amount, 0)) }}</strong><em>{{ recurringExpenses.length }} жазба</em></div>
+        <div><span><UsersRound :size="19" /></span><small>{{ t("Көшірілетін команда") }}</small><strong>{{ copyableEmployees }} {{ t("адам") }}</strong><em>{{ t("Кураторлар мен Сату бөлімі бос ашылады") }}</em></div>
+        <div><span><WalletCards :size="19" /></span><small>{{ t("Айлық қоры") }}</small><strong>{{ formatMoney(copyableSalary) }}</strong></div>
+        <div><span><ReceiptText :size="19" /></span><small>{{ t("Міндетті төлемдер") }}</small><strong>{{ formatMoney(recurringExpenses.reduce((sum, item) => sum + item.amount, 0)) }}</strong><em>{{ recurringExpenses.length }} {{ t("жазба") }}</em></div>
       </div>
-      <label class="check-card"><input v-model="copyRecurring" type="checkbox" /><span><strong>Міндетті төлемдерді көшіру</strong><small>Аренда, интернет, подписка — ай сайын қайталанатындар</small></span></label>
-      <div class="inline-note"><CopyPlus :size="18" /><span>Айлықтар мен қосымша/ұсталымдар көшіріледі. Барлық «Төленді» белгілері жаңа айда басынан басталады. Басқа (бір реттік) шығындар көшірілмейді.</span></div>
-      <div class="modal-actions"><button type="button" class="button ghost" @click="emit('close')">Болдырмау</button><button class="button primary" :disabled="payroll.saving.value || previewLoading || exists || !sourceMonthId">{{ payroll.saving.value ? "Құрылуда…" : "Айды құру" }}</button></div>
+      <label class="check-card"><input v-model="copyRecurring" type="checkbox" /><span><strong>{{ t("Міндетті төлемдерді көшіру") }}</strong><small>{{ t("Аренда, интернет, подписка — ай сайын қайталанатындар") }}</small></span></label>
+      <div class="inline-note"><CopyPlus :size="18" /><span>{{ t("Айлықтар мен қосымша/ұсталымдар көшіріледі. Барлық «Төленді» белгілері жаңа айда басынан басталады. Басқа (бір реттік) шығындар көшірілмейді.") }}</span></div>
+      <div class="modal-actions"><button type="button" class="button ghost" @click="emit('close')">{{ t("Болдырмау") }}</button><button class="button primary" :disabled="payroll.saving.value || previewLoading || exists || !sourceMonthId">{{ payroll.saving.value ? t("Құрылуда…") : t("Айды құру") }}</button></div>
     </form>
   </UiModal>
 </template>

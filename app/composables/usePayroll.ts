@@ -129,7 +129,7 @@ export function usePayroll() {
       } else {
         authenticated.value = true;
         error.value = apiError.data?.error
-          || "Деректерді жүктеу уақытша мүмкін болмады. Қайта көріңіз.";
+          || useLocale().t("Деректерді жүктеу уақытша мүмкін болмады. Қайта көріңіз.");
       }
     } finally {
       if (requestId === loadSequence.value) loading.value = false;
@@ -177,7 +177,7 @@ export function usePayroll() {
         authenticated.value = false;
         data.value = null;
       } else {
-        error.value = apiError.data?.error || apiError.message || "Әрекет орындалмады.";
+        error.value = useLocale().t(apiError.data?.error || apiError.message || "Әрекет орындалмады.");
       }
       if (previousData) data.value = previousData;
       return false;

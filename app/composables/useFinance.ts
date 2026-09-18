@@ -22,13 +22,32 @@ export const GROUP_COLORS = { payroll: "#2a78d6", marketing: "#eb6834", opex: "#
 export const KIND_COLORS = { salary: "#2a78d6", mandatory: "#eb6834", target: "#1baf7a", other: "#eda100" } as const;
 export const projectColor = (index: number) => PROJECT_COLORS[Math.max(0, index) % PROJECT_COLORS.length]!;
 
-const MONTHS = ["қаңтар", "ақпан", "наурыз", "сәуір", "мамыр", "маусым", "шілде", "тамыз", "қыркүйек", "қазан", "қараша", "желтоқсан"];
-const MONTHS_SHORT = ["қаң", "ақп", "нау", "сәу", "мам", "мау", "шіл", "там", "қыр", "қаз", "қар", "жел"];
+const MONTHS = {
+  kk: ["қаңтар", "ақпан", "наурыз", "сәуір", "мамыр", "маусым", "шілде", "тамыз", "қыркүйек", "қазан", "қараша", "желтоқсан"],
+  ru: ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"],
+};
+const MONTHS_SHORT = {
+  kk: ["қаң", "ақп", "нау", "сәу", "мам", "мау", "шіл", "там", "қыр", "қаз", "қар", "жел"],
+  ru: ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+};
 
+/**
+ * «2026 ж. қыркүйек» or «сентябрь 2026», depending on the language. Called from templates, so the
+ * locale is read at render time and every month label follows the switch without a reload.
+ */
 export function periodLabel(period: string, short = false): string {
   const [year, month] = period.split("-").map(Number);
-  const name = (short ? MONTHS_SHORT : MONTHS)[month! - 1] ?? period;
-  return short ? name : `${year} ж. ${name}`;
+  const locale = useState<"kk" | "ru">("app:locale", () => "kk").value === "ru" ? "ru" : "kk";
+  const name = (short ? MONTHS_SHORT : MONTHS)[locale][month! - 1] ?? period;
+  return short ? name : locale === "ru" ? `${name} ${year}` : `${year} ж. ${name}`;
+}
+
+/**
+ * The month name for a Payroll row. The server sends a Kazakh `label`, but it also sends the year and
+ * the month, so the name is built here and follows the chosen language like every other month label.
+ */
+export function monthName(month: { year: number; month: number }): string {
+  return periodLabel(`${month.year}-${String(month.month).padStart(2, "0")}`);
 }
 
 export function shiftPeriod(period: string, offset: number): string {
@@ -50,8 +69,10 @@ export function money(value: number | null | undefined): string {
 export function compactMoney(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   const abs = Math.abs(value);
+  // «мың» is Kazakh for thousand; Russian abbreviates it «тыс». «млн» is the same in both.
+  const thousand = useState<"kk" | "ru">("app:locale", () => "kk").value === "ru" ? "тыс" : "мың";
   if (abs >= 1_000_000) return `${clean(DECIMAL.format(value / 1_000_000))} млн ₸`;
-  if (abs >= 10_000) return `${clean(NUMBER.format(value / 1000))} мың ₸`;
+  if (abs >= 10_000) return `${clean(NUMBER.format(value / 1000))} ${thousand} ₸`;
   return money(value);
 }
 export function formatCount(value: number | null | undefined, digits = 0): string {

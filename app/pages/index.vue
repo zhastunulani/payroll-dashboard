@@ -4,6 +4,7 @@ import { FINANCE_CATEGORIES, PNL_ORDER, type FinanceCategory, type FinanceIssue,
 
 const finance = useFinance();
 const ctx = useAppContext();
+const { t } = useLocale();
 const { projects, summaries, total, period } = finance;
 onMounted(finance.load);
 
@@ -29,7 +30,7 @@ const cards = computed(() => projects.value.map(p => {
     color: finance.colorOf(p.id),
     warnings: (finance.issues.value[p.id] ?? []).filter(i => i.level !== "info").length,
     delta: prev?.hasData ? relativeChange(s.cost, prev.cost) : null,
-    spark: finance.trendOf(p.id).map(t => t.hasData ? t.cost : null),
+    spark: finance.trendOf(p.id).map(point => point.hasData ? point.cost : null),
   };
 }));
 
@@ -38,7 +39,7 @@ const chart = computed(() => {
   return {
     labels: window.map(p => periodLabel(p, true)),
     details: window.map(p => periodLabel(p)),
-    series: projects.value.map(p => ({ key: p.id, label: p.name, color: finance.colorOf(p.id), values: finance.trendOf(p.id).map(t => t.hasData ? t.cost : null) })),
+    series: projects.value.map(p => ({ key: p.id, label: p.name, color: finance.colorOf(p.id), values: finance.trendOf(p.id).map(point => point.hasData ? point.cost : null) })),
   };
 });
 
@@ -102,77 +103,77 @@ const share = (paid: number, all: number) => all > 0 ? paid / all : null;
 <template>
   <div class="analytics-page">
     <AnalyticsHeader />
-    <p v-if="finance.error.value" class="finance-error" role="alert">{{ finance.error.value }} <button type="button" @click="finance.load">Қайта жүктеу</button></p>
+    <p v-if="finance.error.value" class="finance-error" role="alert">{{ finance.error.value }} <button type="button" @click="finance.load">{{ t("Қайта жүктеу") }}</button></p>
     <div v-if="!finance.data.value" class="analytics-skeleton" aria-busy="true"><i v-for="n in 4" :key="n" /></div>
 
     <template v-else>
-      <section class="kpi-row" aria-label="Барлық жоба бойынша негізгі көрсеткіштер" :class="{ stale: !finance.fresh.value }">
-        <KpiTile tone="brand" label="Айдың барлық шығыны" :value="money(total.cost)" :sub="`${projects.length} жоба · жұмсалды ${compactMoney(total.paid)}`" :delta="relativeChange(total.cost, previousTotal(p => p.cost))" />
-        <KpiTile label="Айлық төлемі" :value="money(totals.salary)" :progress="share(totals.salaryPaid, totals.salary)" :sub="totals.salaryUnpaid ? `Төленді ${compactMoney(totals.salaryPaid)} · қалды ${compactMoney(totals.salaryUnpaid)} (${totals.salaryPeople} адам)` : 'Барлық айлық төленді'" />
-        <KpiTile label="Міндетті төлемдер" :value="money(totals.mandatory)" :progress="share(totals.mandatoryPaid, totals.mandatory)" :sub="totals.mandatoryUnpaid ? `Төленді ${compactMoney(totals.mandatoryPaid)} · қалды ${compactMoney(totals.mandatoryUnpaid)} (${totals.mandatoryItems} төлем)` : 'Аренда, интернет, подписка — төленді'" />
-        <KpiTile label="Таргет + басқа шығындар" :value="money(totals.target + totals.other)" :sub="`Таргет ${compactMoney(totals.target)} · басқа ${compactMoney(totals.other)} — жұмсалды`" :delta="relativeChange(totals.target + totals.other, previousTotal(p => p.kinds.target + p.kinds.other))" />
-        <KpiTile v-if="total.profit !== null" :tone="total.profit < 0 ? 'danger' : 'success'" label="Операциялық нәтиже" :value="money(total.profit)" :sub="`Маржа ${formatPercent(total.margin)}`" good-when="up" />
-        <KpiTile v-else label="Операциялық нәтиже" :value="`Табыс ${total.revenueCoverage}/${projects.length}`" sub="Барлық жобаның табысы енгізілгенде есептеледі" />
+      <section class="kpi-row" :aria-label="t('Барлық жоба бойынша негізгі көрсеткіштер')" :class="{ stale: !finance.fresh.value }">
+        <KpiTile tone="brand" :label="t('Айдың барлық шығыны')" :value="money(total.cost)" :sub="`${projects.length} ${t('жоба')} · ${t('жұмсалды')} ${compactMoney(total.paid)}`" :delta="relativeChange(total.cost, previousTotal(p => p.cost))" />
+        <KpiTile :label="t('Айлық төлемі')" :value="money(totals.salary)" :progress="share(totals.salaryPaid, totals.salary)" :sub="totals.salaryUnpaid ? `${t('Төленді')} ${compactMoney(totals.salaryPaid)} · ${t('қалды')} ${compactMoney(totals.salaryUnpaid)} (${totals.salaryPeople} ${t('адам')})` : t('Барлық айлық төленді')" />
+        <KpiTile :label="t('Міндетті төлемдер')" :value="money(totals.mandatory)" :progress="share(totals.mandatoryPaid, totals.mandatory)" :sub="totals.mandatoryUnpaid ? `${t('Төленді')} ${compactMoney(totals.mandatoryPaid)} · ${t('қалды')} ${compactMoney(totals.mandatoryUnpaid)} (${totals.mandatoryItems} ${t('төлем')})` : t('Аренда, интернет, подписка — төленді')" />
+        <KpiTile :label="t('Таргет + басқа шығындар')" :value="money(totals.target + totals.other)" :sub="`${t('Таргет')} ${compactMoney(totals.target)} · ${t('басқа')} ${compactMoney(totals.other)} — ${t('жұмсалды')}`" :delta="relativeChange(totals.target + totals.other, previousTotal(p => p.kinds.target + p.kinds.other))" />
+        <KpiTile v-if="total.profit !== null" :tone="total.profit < 0 ? 'danger' : 'success'" :label="t('Операциялық нәтиже')" :value="money(total.profit)" :sub="`${t('Маржа')} ${formatPercent(total.margin)}`" good-when="up" />
+        <KpiTile v-else :label="t('Операциялық нәтиже')" :value="`${t('Табыс')} ${total.revenueCoverage}/${projects.length}`" :sub="t('Барлық жобаның табысы енгізілгенде есептеледі')" />
       </section>
 
-      <section class="project-grid" aria-label="Жобалар">
+      <section class="project-grid" :aria-label="t('Жобалар')">
         <article v-for="c in cards" :key="c.id" class="project-card" :style="{ '--project': c.color }" :class="{ stale: !finance.fresh.value }">
           <header>
             <NuxtLink :to="ctx.financeLink(c.id)" class="project-name"><i />{{ c.name }}<ArrowUpRight :size="15" /></NuxtLink>
-            <NuxtLink v-if="c.warnings" :to="ctx.financeLink(c.id, {}, '#issues')" class="project-flag">{{ c.warnings }} ескерту</NuxtLink>
+            <NuxtLink v-if="c.warnings" :to="ctx.financeLink(c.id, {}, '#issues')" class="project-flag">{{ c.warnings }} {{ t("ескерту") }}</NuxtLink>
           </header>
           <NuxtLink :to="ctx.financeLink(c.id, {}, '#pnl')" class="project-main">
-            <small>Айдың шығыны</small>
+            <small>{{ t("Айдың шығыны") }}</small>
             <strong>{{ money(c.s.cost) }}</strong>
-            <span v-if="c.delta !== null" class="project-delta" :class="c.delta > 0 ? 'bad' : 'good'">{{ c.delta > 0 ? "▲" : "▼" }} {{ formatDelta(c.delta) }} өткен айға</span>
-            <span v-else class="project-delta">Өткен айда дерек жоқ</span>
+            <span v-if="c.delta !== null" class="project-delta" :class="c.delta > 0 ? 'bad' : 'good'">{{ c.delta > 0 ? "▲" : "▼" }} {{ formatDelta(c.delta) }} {{ t("өткен айға") }}</span>
+            <span v-else class="project-delta">{{ t("Өткен айда дерек жоқ") }}</span>
           </NuxtLink>
           <ChartSparkline :values="c.spark" :color="c.color" />
           <div class="project-rows">
             <NuxtLink :to="ctx.payrollLink('/departments', c.id, '#payment-queue')" class="project-row">
-              <span>Айлық</span>
+              <span>{{ t("Айлық") }}</span>
               <b>{{ money(c.s.kinds.salary.total) }}</b>
-              <small v-if="c.s.kinds.salary.unpaid" class="owed">қалды {{ compactMoney(c.s.kinds.salary.unpaid) }} · {{ c.s.kinds.salary.unpaidCount }} адам</small>
-              <small v-else-if="c.s.kinds.salary.total" class="done">төленді</small>
-              <small v-else>айлық жоқ</small>
+              <small v-if="c.s.kinds.salary.unpaid" class="owed">{{ t("қалды") }} {{ compactMoney(c.s.kinds.salary.unpaid) }} · {{ c.s.kinds.salary.unpaidCount }} {{ t("адам") }}</small>
+              <small v-else-if="c.s.kinds.salary.total" class="done">{{ t("төленді") }}</small>
+              <small v-else>{{ t("айлық жоқ") }}</small>
             </NuxtLink>
             <NuxtLink :to="ctx.payrollLink('/expenses', c.id)" class="project-row">
-              <span>Міндетті төлемдер</span>
+              <span>{{ t("Міндетті төлемдер") }}</span>
               <b>{{ money(c.s.kinds.mandatory.total) }}</b>
-              <small v-if="c.s.kinds.mandatory.unpaid" class="owed">қалды {{ compactMoney(c.s.kinds.mandatory.unpaid) }} · {{ c.s.kinds.mandatory.unpaidCount }} төлем</small>
-              <small v-else-if="c.s.kinds.mandatory.total" class="done">төленді</small>
-              <small v-else>енгізілмеген</small>
+              <small v-if="c.s.kinds.mandatory.unpaid" class="owed">{{ t("қалды") }} {{ compactMoney(c.s.kinds.mandatory.unpaid) }} · {{ c.s.kinds.mandatory.unpaidCount }} {{ t("төлем") }}</small>
+              <small v-else-if="c.s.kinds.mandatory.total" class="done">{{ t("төленді") }}</small>
+              <small v-else>{{ t("енгізілмеген") }}</small>
             </NuxtLink>
             <NuxtLink :to="ctx.financeLink(c.id, { kind: 'target' }, '#ledger')" class="project-row">
-              <span>Таргет (Facebook)</span><b>{{ money(c.s.kinds.target.total) }}</b><small>жұмсалды</small>
+              <span>{{ t("Таргет (Facebook)") }}</span><b>{{ money(c.s.kinds.target.total) }}</b><small>{{ t("жұмсалды") }}</small>
             </NuxtLink>
             <NuxtLink :to="ctx.financeLink(c.id, { kind: 'other' }, '#ledger')" class="project-row">
-              <span>Басқа шығындар</span><b>{{ money(c.s.kinds.other.total) }}</b><small>{{ c.s.kinds.other.count }} жазба</small>
+              <span>{{ t("Басқа шығындар") }}</span><b>{{ money(c.s.kinds.other.total) }}</b><small>{{ c.s.kinds.other.count }} {{ t("жазба") }}</small>
             </NuxtLink>
             <NuxtLink v-if="c.s.profit !== null" :to="ctx.financeLink(c.id, {}, c.s.revenueSource === 'bank' ? '#receipts' : '#pnl')" class="project-row">
-              <span>Нәтиже</span><b :class="{ negative: c.s.profit < 0 }">{{ money(c.s.profit) }}</b><small :class="{ 'from-bank': c.s.revenueSource === 'bank' }">табыс {{ compactMoney(c.s.revenue) }} · {{ c.s.revenueSource === "bank" ? "выписка бойынша" : "қолмен" }} · маржа {{ formatPercent(c.s.margin, 0) }}</small>
+              <span>{{ t("Нәтиже") }}</span><b :class="{ negative: c.s.profit < 0 }">{{ money(c.s.profit) }}</b><small :class="{ 'from-bank': c.s.revenueSource === 'bank' }">{{ t("табыс") }} {{ compactMoney(c.s.revenue) }} · {{ c.s.revenueSource === "bank" ? t("выписка бойынша") : t("қолмен") }} · {{ t("маржа") }} {{ formatPercent(c.s.margin, 0) }}</small>
             </NuxtLink>
             <NuxtLink v-else :to="`/unit-economics?month=${period}#metrics-${c.id}`" class="project-row missing">
-              <span>Нәтиже</span><b>Табыс енгізу</b><small>табыс жоқ</small>
+              <span>{{ t("Нәтиже") }}</span><b>{{ t("Табыс енгізу") }}</b><small>{{ t("табыс жоқ") }}</small>
             </NuxtLink>
           </div>
           <footer>
-            <div class="paid-meter" role="img" :aria-label="`Айлық пен міндетті төлемдер: төленді ${formatPercent(c.s.obligations.share ?? 0, 0)}`"><i :style="{ width: `${Math.min(100, (c.s.obligations.share ?? 0) * 100)}%` }" /></div>
-            <small v-if="c.s.obligations.total">Айлық + міндетті: төленді {{ formatPercent(c.s.obligations.share, 0) }} · қалды {{ compactMoney(c.s.obligations.unpaid) }}</small>
-            <small v-else>Бұл айда айлық пен міндетті төлем жоқ</small>
+            <div class="paid-meter" role="img" :aria-label="`${t('Айлық пен міндетті төлемдер: төленді')} ${formatPercent(c.s.obligations.share ?? 0, 0)}`"><i :style="{ width: `${Math.min(100, (c.s.obligations.share ?? 0) * 100)}%` }" /></div>
+            <small v-if="c.s.obligations.total">{{ t("Айлық + міндетті: төленді") }} {{ formatPercent(c.s.obligations.share, 0) }} · {{ t("қалды") }} {{ compactMoney(c.s.obligations.unpaid) }}</small>
+            <small v-else>{{ t("Бұл айда айлық пен міндетті төлем жоқ") }}</small>
           </footer>
         </article>
       </section>
 
       <div class="analytics-columns">
         <section class="panel analytics-panel">
-          <header><div><span class="eyebrow">Динамика</span><h2>Шығын жобалар бойынша, 6 ай</h2></div><small class="panel-note">Әр жобаның бағаны бөлек</small></header>
-          <ChartColumns caption="Айлық шығын жобалар бойынша" grouped :labels="chart.labels" :details="chart.details" :series="chart.series" :format="money" :axis-format="compactMoney" />
+          <header><div><span class="eyebrow">{{ t("Динамика") }}</span><h2>{{ t("Шығын жобалар бойынша, 6 ай") }}</h2></div><small class="panel-note">{{ t("Әр жобаның бағаны бөлек") }}</small></header>
+          <ChartColumns :caption="t('Айлық шығын жобалар бойынша')" grouped :labels="chart.labels" :details="chart.details" :series="chart.series" :format="money" :axis-format="compactMoney" />
         </section>
         <section class="panel analytics-panel">
           <header>
-            <div><span class="eyebrow">Бақылау</span><h2>Назар аударыңыз</h2></div>
-            <button v-if="attention.length > shownAttention.length || showAllIssues" type="button" class="text-button" @click="showAllIssues = !showAllIssues">{{ showAllIssues ? "Қысқаша" : `Барлығы (${attention.length})` }}</button>
+            <div><span class="eyebrow">{{ t("Бақылау") }}</span><h2>{{ t("Назар аударыңыз") }}</h2></div>
+            <button v-if="attention.length > shownAttention.length || showAllIssues" type="button" class="text-button" @click="showAllIssues = !showAllIssues">{{ showAllIssues ? t("Қысқаша") : `${t("Барлығы")} (${attention.length})` }}</button>
           </header>
           <FinanceIssueList :items="shownAttention" />
         </section>
@@ -180,25 +181,25 @@ const share = (paid: number, all: number) => all > 0 ? paid / all : null;
 
       <section class="panel analytics-panel">
         <header>
-          <div><span class="eyebrow">P&amp;L · {{ periodLabel(period) }}</span><h2>Жобалар бойынша айлық есеп</h2></div>
-          <small class="panel-note">Санды басып, толық тізімін ашыңыз · салыстыру: {{ periodLabel(shiftPeriod(period, -1)) }}</small>
+          <div><span class="eyebrow">P&amp;L · {{ periodLabel(period) }}</span><h2>{{ t("Жобалар бойынша айлық есеп") }}</h2></div>
+          <small class="panel-note">{{ t("Санды басып, толық тізімін ашыңыз · салыстыру:") }} {{ periodLabel(shiftPeriod(period, -1)) }}</small>
         </header>
         <div class="table-scroll">
           <table class="pnl-table">
             <thead>
               <tr>
-                <th scope="col">Көрсеткіш</th>
+                <th scope="col">{{ t("Көрсеткіш") }}</th>
                 <th v-for="p in projects" :key="p.id" scope="col"><NuxtLink :to="ctx.financeLink(p.id)"><i :style="{ background: finance.colorOf(p.id) }" />{{ p.name }}</NuxtLink></th>
-                <th scope="col" class="total-col">Барлығы</th>
-                <th scope="col">Өткен ай</th>
-                <th scope="col">Өзгеріс</th>
+                <th scope="col" class="total-col">{{ t("Барлығы") }}</th>
+                <th scope="col">{{ t("Өткен ай") }}</th>
+                <th scope="col">{{ t("Өзгеріс") }}</th>
               </tr>
             </thead>
             <tbody>
               <template v-for="(row, index) in table" :key="'section' in row ? `s${index}` : row.key">
-                <tr v-if="'section' in row" class="pnl-section"><th :colspan="projects.length + 4" scope="rowgroup">{{ row.section }}</th></tr>
+                <tr v-if="'section' in row" class="pnl-section"><th :colspan="projects.length + 4" scope="rowgroup">{{ t(row.section) }}</th></tr>
                 <tr v-else :class="row.style">
-                  <th scope="row">{{ row.label }}</th>
+                  <th scope="row">{{ t(row.label) }}</th>
                   <td v-for="(c, i) in row.cells" :key="i" :class="{ negative: row.key === 'profit' && c.value !== null && c.value < 0, owed: row.style === 'sub' && (c.value ?? 0) > 0 }">
                     <NuxtLink v-if="c.to && c.value !== null && c.value !== 0" :to="c.to" class="cell-link">{{ cell(c.value, row.kind) }}</NuxtLink>
                     <template v-else>{{ cell(c.value, row.kind) }}</template>
@@ -211,7 +212,7 @@ const share = (paid: number, all: number) => all > 0 ? paid / all : null;
             </tbody>
           </table>
         </div>
-        <p class="panel-footnote">Айлық пен міндетті төлемдер «төленді / төленбеді» болып бөлінеді; таргет пен басқа шығындар — жұмсалған ақша. Айлық пен міндетті төлем сілтемелері сол жобаның Payroll бетін ашады. «—» — дерек енгізілмеген.</p>
+        <p class="panel-footnote">{{ t("Айлық пен міндетті төлемдер «төленді / төленбеді» болып бөлінеді; таргет пен басқа шығындар — жұмсалған ақша. Айлық пен міндетті төлем сілтемелері сол жобаның Payroll бетін ашады. «—» — дерек енгізілмеген.") }}</p>
       </section>
     </template>
   </div>

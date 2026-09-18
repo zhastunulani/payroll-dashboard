@@ -63,7 +63,8 @@ test("new employees start at zero but base salary remains editable", async () =>
   const form = await readFile(new URL("app/components/EmployeeForm.vue", root), "utf8");
   const route = await readFile(new URL("app/api/payroll/route.ts", root), "utf8");
   assert.match(form, /props\.employee\?\.baseSalary \?\? 0/);
-  assert.match(form, /<span>Негізгі айлық<\/span>/);
+  // Interface text goes through t() for the Russian translation.
+  assert.match(form, /<span>\{\{ t\("Негізгі айлық"\) \}\}<\/span>/);
   assert.doesNotMatch(form, /v-if="!fixedZeroBaseSalary"/);
   assert.match(route, /const baseSalary = money\(body\.baseSalary, "Негізгі айлық"\)/);
   assert.doesNotMatch(route, /fixedZeroBaseSalary/);

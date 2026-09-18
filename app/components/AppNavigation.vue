@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Building2, Calculator, Check, Landmark, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
+import { Building2, Calculator, Check, ChevronDown, Landmark, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const ctx = useAppContext();
 const route = useRoute();
+const { locale, setLocale, t, locales } = useLocale();
 // Reports cover all projects; Payroll operations work inside the profile chosen below.
 const links = [
   { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "analytics" },
@@ -17,6 +18,29 @@ const links = [
 ];
 const groups = ["analytics", "payroll"].map(name => ({ name, links: links.filter(link => link.group === name) }));
 const isActive = (to: string) => route.path === to || (to === "/expenses" && route.path === "/other-expenses");
+
+/**
+ * The sidebar keeps its groups folded. Eight links open at once made the finance section a wall of
+ * text, so only the group holding the current page opens by default, and the choice is remembered.
+ */
+const openGroups = useCookie<string[]>("payroll_nav_open", {
+  sameSite: "lax", maxAge: 60 * 60 * 24 * 365,
+  default: () => [],
+});
+const currentGroup = computed(() => links.find(l => isActive(l.to))?.group ?? "analytics");
+const isOpen = (name: string) => (openGroups.value?.length ? openGroups.value.includes(name) : name === currentGroup.value);
+function toggleGroup(name: string) {
+  const open = new Set(openGroups.value?.length ? openGroups.value : [currentGroup.value]);
+  if (open.has(name)) open.delete(name);
+  else open.add(name);
+  // An empty list would mean «follow the current page» again, so a deliberate all-closed state is kept.
+  openGroups.value = open.size ? [...open] : ["none"];
+}
+// Opening a page inside a folded group unfolds it, so the active link is never hidden.
+watch(currentGroup, name => {
+  if (openGroups.value?.length && !openGroups.value.includes(name)) openGroups.value = [...openGroups.value, name];
+});
+
 const projectSheetOpen = ref(false);
 const longPressTriggered = ref(false);
 let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,6 +72,7 @@ async function selectWorkspace(id: string) {
   if (id !== payroll.data.value?.selectedWorkspace.id) await payroll.switchWorkspace(id);
 }
 
+onMounted(() => { document.documentElement.lang = locale.value; });
 onBeforeUnmount(stopSettingsHold);
 </script>
 
@@ -56,36 +81,53 @@ onBeforeUnmount(stopSettingsHold);
     <NuxtLink to="/" class="app-logo"><span>A</span><div><strong>Айлық</strong><small>Finance OS</small></div></NuxtLink>
     <nav>
       <template v-for="group in groups" :key="group.name">
-        <span v-if="group.name === 'analytics'" class="nav-caption">Талдау · барлық жоба</span>
-        <span v-else class="nav-caption nav-project" :style="{ '--project': ctx.workspaceColor.value }"><i />Payroll · {{ ctx.workspace.value?.name || "жоба" }}</span>
-        <NuxtLink v-for="link in group.links" :key="link.to" :to="link.to" :class="{ active: isActive(link.to) }">
-          <component :is="link.icon" :size="19" /><span>{{ link.label }}</span>
-        </NuxtLink>
+        <button
+          type="button" class="nav-group" :class="{ open: isOpen(group.name) }"
+          :aria-expanded="isOpen(group.name)" :title="isOpen(group.name) ? t('Бөлімді жию') : t('Бөлімді ашу')"
+          :style="group.name === 'payroll' ? { '--project': ctx.workspaceColor.value } : undefined"
+          @click="toggleGroup(group.name)"
+        >
+          <i v-if="group.name === 'payroll'" class="nav-project-dot" />
+          <span>{{ group.name === "analytics" ? t("Талдау · барлық жоба") : `Payroll · ${ctx.workspace.value?.name || t("жоба")}` }}</span>
+          <ChevronDown :size="14" />
+        </button>
+        <div v-show="isOpen(group.name)" class="nav-group-links">
+          <NuxtLink v-for="link in group.links" :key="link.to" :to="link.to" :class="{ active: isActive(link.to) }">
+            <component :is="link.icon" :size="19" /><span>{{ t(link.label) }}</span>
+          </NuxtLink>
+        </div>
       </template>
     </nav>
     <div class="sidebar-status">
-      <i /><span><strong>Жүйе жұмыс істеп тұр</strong><small>Деректер синхрондалды</small></span>
+      <i /><span><strong>{{ t("Жүйе жұмыс істеп тұр") }}</strong><small>{{ t("Деректер синхрондалды") }}</small></span>
+    </div>
+    <div class="sidebar-locale" role="group" :aria-label="t('Тіл')">
+      <button
+        v-for="option in locales" :key="option.id" type="button"
+        :class="{ active: locale === option.id }" :aria-pressed="locale === option.id"
+        :title="option.label" @click="setLocale(option.id)"
+      >{{ option.short }}</button>
     </div>
     <WorkspaceSwitcher />
-    <button class="sidebar-logout" type="button" @click="payroll.logout"><LogOut :size="18" /> Шығу</button>
+    <button class="sidebar-logout" type="button" @click="payroll.logout"><LogOut :size="18" /> {{ t("Шығу") }}</button>
   </aside>
 
-  <nav class="mobile-navigation" aria-label="Негізгі навигация">
+  <nav class="mobile-navigation" :aria-label="t('Негізгі навигация')">
     <NuxtLink v-for="link in links" :key="link.to" :to="link.to" :class="{ active: isActive(link.to) }" @pointerdown="startSettingsHold(link.to)" @pointerup="stopSettingsHold" @pointercancel="stopSettingsHold" @pointerleave="stopSettingsHold" @contextmenu.prevent @click="handleNavigationClick($event, link.to)">
-      <component :is="link.icon" :size="20" /><span>{{ link.short }}</span>
+      <component :is="link.icon" :size="20" /><span>{{ t(link.short) }}</span>
     </NuxtLink>
   </nav>
 
   <div v-if="projectSheetOpen" class="project-sheet-backdrop" @click.self="projectSheetOpen = false">
-    <section class="project-sheet" role="dialog" aria-modal="true" aria-label="Жобаны ауыстыру">
-      <header><div><span class="eyebrow">Жұмыс кеңістігі</span><h2>Жобаны таңдаңыз</h2></div><button type="button" aria-label="Жабу" @click="projectSheetOpen = false"><X :size="18" /></button></header>
+    <section class="project-sheet" role="dialog" aria-modal="true" :aria-label="t('Жобаны ауыстыру')">
+      <header><div><span class="eyebrow">{{ t("Жұмыс кеңістігі") }}</span><h2>{{ t("Жобаны таңдаңыз") }}</h2></div><button type="button" :aria-label="t('Жабу')" @click="projectSheetOpen = false"><X :size="18" /></button></header>
       <div class="project-sheet-options">
         <button v-for="workspace in payroll.data.value?.workspaces" :key="workspace.id" type="button" :class="{ active: workspace.id === payroll.data.value?.selectedWorkspace.id }" :disabled="payroll.loading.value" @click="selectWorkspace(workspace.id)">
-          <span><strong>{{ workspace.name }}</strong><small>{{ workspace.id === payroll.data.value?.selectedWorkspace.id ? 'Қазір ашық' : 'Ауыстыру' }}</small></span>
+          <span><strong>{{ workspace.name }}</strong><small>{{ workspace.id === payroll.data.value?.selectedWorkspace.id ? t("Қазір ашық") : t("Ауыстыру") }}</small></span>
           <Check v-if="workspace.id === payroll.data.value?.selectedWorkspace.id" :size="18" />
         </button>
       </div>
-      <p>Бұл терезені ашу үшін «Баптау» батырмасын ұзақ басыңыз.</p>
+      <p>{{ t("Бұл терезені ашу үшін «Баптау» батырмасын ұзақ басыңыз.") }}</p>
     </section>
   </div>
 </template>

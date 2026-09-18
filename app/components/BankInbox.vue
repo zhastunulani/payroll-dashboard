@@ -5,6 +5,7 @@ import { BANK_LABELS, KIND_LABELS, needsAssignment, sourceOf, type BankOperation
 /** Operations without a project, grouped by where they come from: one decision per group. */
 const props = defineProps<{ operations: BankOperation[]; projects: BankProject[]; colorOf: (id: string) => string }>();
 const bank = useBank();
+const { t } = useLocale();
 const NONE = "__none";
 
 const groups = computed(() => {
@@ -42,10 +43,10 @@ async function apply(g: (typeof groups.value)[number]) {
   try {
     const projectId = target === NONE ? null : target;
     await bank.assignGroup(g.ops.map(o => o.id), projectId, remember[g.key] && g.rule ? g.rule : null);
-    const name = projectId ? props.projects.find(p => p.id === projectId)?.name : "«Жобаға қатысы жоқ»";
-    done.value = `«${g.label}»: ${g.ops.length} операция → ${name}${remember[g.key] && g.rule ? ". Келесі выпискаларда да осылай бөлінеді." : "."}`;
+    const name = projectId ? props.projects.find(p => p.id === projectId)?.name : `«${t("Жобаға қатысы жоқ")}»`;
+    done.value = `«${g.label}»: ${g.ops.length} ${t("операция")} → ${name}${remember[g.key] && g.rule ? `. ${t("Келесі выпискаларда да осылай бөлінеді.")}` : "."}`;
   } catch (e) {
-    error.value = messageOf(e, "Бөлу орындалмады.");
+    error.value = messageOf(e, t("Бөлу орындалмады."));
   } finally {
     busy.value = null;
   }
@@ -56,8 +57,8 @@ const day = (iso: string) => iso.split("-").reverse().slice(0, 2).join(".");
 <template>
   <section v-if="groups.length || done" class="panel bank-inbox">
     <header>
-      <div><span class="eyebrow">Бөлу керек</span><h2>Жобасы белгісіз операциялар</h2></div>
-      <small class="panel-note">Бөлінгенге дейін ешбір жобаның есебіне кірмейді</small>
+      <div><span class="eyebrow">{{ t("Бөлу керек") }}</span><h2>{{ t("Жобасы белгісіз операциялар") }}</h2></div>
+      <small class="panel-note">{{ t("Бөлінгенге дейін ешбір жобаның есебіне кірмейді") }}</small>
     </header>
     <p v-if="done" class="bank-done" role="status"><CheckCircle2 :size="16" /> {{ done }}</p>
     <p v-if="error" class="finance-error" role="alert">{{ error }}</p>
@@ -66,22 +67,22 @@ const day = (iso: string) => iso.split("-").reverse().slice(0, 2).join(".");
         <div class="bank-inbox-source">
           <strong>{{ g.label }}</strong>
           <small>{{ g.bankName }}<template v-if="g.entities.length"> · {{ g.entities.join(", ") }}</template> · {{ day(g.from) }}–{{ day(g.to) }}</small>
-          <small v-if="g.suggested" class="bank-suggest">Ұсыныс: {{ projects.find(p => p.id === g.suggested)?.name }} (ереже бекітілмеген)</small>
+          <small v-if="g.suggested" class="bank-suggest">{{ t("Ұсыныс") }}: {{ projects.find(p => p.id === g.suggested)?.name }} ({{ t("ереже бекітілмеген") }})</small>
         </div>
-        <div class="bank-inbox-money"><b>{{ money(g.amount) }}</b><small>{{ g.ops.length }} операция</small></div>
+        <div class="bank-inbox-money"><b>{{ money(g.amount) }}</b><small>{{ g.ops.length }} {{ t("операция") }}</small></div>
         <div class="bank-inbox-action">
-          <select v-model="choice[g.key]" :aria-label="`${g.label}: жоба`">
-            <option value="" disabled>Жобаны таңдаңыз…</option>
+          <select v-model="choice[g.key]" :aria-label="`${g.label}: ${t('жоба')}`">
+            <option value="" disabled>{{ t("Жобаны таңдаңыз…") }}</option>
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-            <option :value="NONE">Жобаға қатысы жоқ</option>
+            <option :value="NONE">{{ t("Жобаға қатысы жоқ") }}</option>
           </select>
-          <button class="button primary" type="button" :disabled="!choice[g.key] || busy === g.key" @click="apply(g)">{{ busy === g.key ? "…" : "Бөлу" }}</button>
-          <label v-if="g.rule" class="finance-check"><input v-model="remember[g.key]" type="checkbox"> Келесіде де осылай</label>
+          <button class="button primary" type="button" :disabled="!choice[g.key] || busy === g.key" @click="apply(g)">{{ busy === g.key ? "…" : t("Бөлу") }}</button>
+          <label v-if="g.rule" class="finance-check"><input v-model="remember[g.key]" type="checkbox"> {{ t("Келесіде де осылай") }}</label>
         </div>
-        <button class="icon-button" type="button" :aria-expanded="open === g.key" aria-label="Операцияларды көру" @click="open = open === g.key ? null : g.key"><ChevronDown :size="16" :class="{ flipped: open === g.key }" /></button>
+        <button class="icon-button" type="button" :aria-expanded="open === g.key" :aria-label="t('Операцияларды көру')" @click="open = open === g.key ? null : g.key"><ChevronDown :size="16" :class="{ flipped: open === g.key }" /></button>
         <ul v-if="open === g.key" class="bank-inbox-ops">
-          <li v-for="o in g.ops.slice(0, 12)" :key="o.id"><span>{{ o.date.split("-").reverse().join(".") }} {{ o.time }}</span><span>{{ KIND_LABELS[o.kind] }} · {{ o.paymentMethod }}</span><b>{{ money(o.amount) }}</b></li>
-          <li v-if="g.ops.length > 12" class="muted">және тағы {{ g.ops.length - 12 }} операция</li>
+          <li v-for="o in g.ops.slice(0, 12)" :key="o.id"><span>{{ o.date.split("-").reverse().join(".") }} {{ o.time }}</span><span>{{ t(KIND_LABELS[o.kind]) }} · {{ t(o.paymentMethod) }}</span><b>{{ money(o.amount) }}</b></li>
+          <li v-if="g.ops.length > 12" class="muted">{{ t("және тағы") }} {{ g.ops.length - 12 }} {{ t("операция") }}</li>
         </ul>
       </li>
     </ul>

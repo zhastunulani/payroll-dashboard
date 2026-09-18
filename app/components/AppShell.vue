@@ -5,6 +5,7 @@ const payroll = usePayroll();
 const finance = useFinance();
 const ctx = useAppContext();
 const route = useRoute();
+const { t } = useLocale();
 const requestedMonth = useState<string | null>("payroll:requested-month", () => null);
 const payrollPage = computed(() => PAYROLL_ROUTES.has(route.path));
 
@@ -43,8 +44,8 @@ watch(ctx.period, () => { if (FINANCE_ROUTES.has(route.path)) finance.load(); })
     <AppNavigation />
     <main class="workspace">
       <PeriodHeader v-if="payrollPage" />
-      <div v-if="payroll.error.value" class="global-alert"><span>{{ payroll.error.value }}</span><button type="button" aria-label="Жабу" @click="payroll.error.value = ''"><X :size="17" /></button></div>
-      <div v-if="payroll.loading.value && payrollPage" class="page-loading"><i /><span>Деректер жаңартылуда…</span></div>
+      <div v-if="payroll.error.value" class="global-alert"><span>{{ t(payroll.error.value) }}</span><button type="button" :aria-label="t('Жабу')" @click="payroll.error.value = ''"><X :size="17" /></button></div>
+      <div v-if="payroll.loading.value && payrollPage" class="page-loading"><i /><span>{{ t("Деректер жаңартылуда…") }}</span></div>
       <slot />
     </main>
     <FinanceEntryModal v-if="finance.entryDraft.value" :entry="finance.entryDraft.value" @close="finance.entryDraft.value = null" @saved="finance.entryDraft.value = null" />

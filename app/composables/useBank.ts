@@ -16,7 +16,7 @@ export function useBank() {
       const next = await $fetch<BankData>("/api/bank", { query: { period: period.value } });
       if (current === sequence) { data.value = next; error.value = ""; }
     } catch (e) {
-      if (current === sequence) error.value = messageOf(e, "Банк деректері жүктелмеді.");
+      if (current === sequence) error.value = useLocale().t(messageOf(e, "Банк деректері жүктелмеді."));
     } finally {
       if (current === sequence) loading.value = false;
     }

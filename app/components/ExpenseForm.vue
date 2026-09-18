@@ -9,6 +9,7 @@ const props = withDefaults(defineProps<{
 }>(), { expense: null, oneTime: false, subscription: false });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const payroll = usePayroll();
+const { t } = useLocale();
 const name = ref(props.expense?.name || "");
 const amount = ref<number | null>(props.expense?.amount ?? null);
 const subscriptionCategory = payroll.data.value?.expenseCategories.find(
@@ -46,15 +47,15 @@ async function save() {
 </script>
 
 <template>
-  <UiModal :title="expense ? 'Шығынды өзгерту' : oneTime ? 'Жаңа шығын' : isSubscription ? 'Жаңа подписка' : 'Міндетті төлем қосу'" :description="oneTime ? 'Сома жұмсалған ақша ретінде бірден реестрге кіреді' : isSubscription ? 'Әр сервис немесе лицензияны жеке тіркеңіз' : 'Ай сайын төленетін шығын және оның төлем статусы'" @close="emit('close')">
+  <UiModal :title="expense ? t('Шығынды өзгерту') : oneTime ? t('Жаңа шығын') : isSubscription ? t('Жаңа подписка') : t('Міндетті төлем қосу')" :description="oneTime ? t('Сома жұмсалған ақша ретінде бірден реестрге кіреді') : isSubscription ? t('Әр сервис немесе лицензияны жеке тіркеңіз') : t('Ай сайын төленетін шығын және оның төлем статусы')" @close="emit('close')">
     <form class="form-stack" @submit.prevent="save">
       <div class="form-symbol"><ShoppingBag v-if="oneTime" :size="22" /><ReceiptText v-else :size="22" /></div>
-      <label class="form-field"><span>{{ isSubscription ? "Не алынды?" : "Шығын атауы" }}</span><input v-model="name" :placeholder="isSubscription ? 'Мысалы: ChatGPT Team немесе Canva Pro' : 'Мысалы: Кеңсе арендасы'" required /></label>
-      <label v-if="!oneTime && !subscription" class="form-field"><span>Категория</span><UiSmartSelect v-model="categoryId" :options="categoryOptions" search-placeholder="Категорияны іздеу" /></label>
-      <label v-if="!oneTime && isSubscription" class="form-field"><span>Қай бөлімге тиесілі?</span><UiSmartSelect v-model="departmentId" :options="departmentOptions" placeholder="Бөлімді таңдаңыз" search-placeholder="Бөлімді іздеу" /></label>
-      <label class="form-field"><span>Сома</span><div class="money-input"><input v-model.number="amount" type="number" min="1" step="1" placeholder="0" required /><b>₸</b></div></label>
-      <label v-if="!oneTime" class="check-card"><input v-model="recurring" type="checkbox" /><span><strong>Әр ай сайын қайталанады</strong><small>Жаңа ай құрылғанда автоматты көшіріледі</small></span></label>
-      <div class="modal-actions"><button type="button" class="button ghost" @click="emit('close')">Болдырмау</button><button class="button primary" :disabled="payroll.saving.value || (isSubscription && !departmentId)">{{ payroll.saving.value ? "Сақталуда…" : "Сақтау" }}</button></div>
+      <label class="form-field"><span>{{ isSubscription ? t("Не алынды?") : t("Шығын атауы") }}</span><input v-model="name" :placeholder="isSubscription ? t('Мысалы: ChatGPT Team немесе Canva Pro') : t('Мысалы: Кеңсе арендасы')" required /></label>
+      <label v-if="!oneTime && !subscription" class="form-field"><span>{{ t("Категория") }}</span><UiSmartSelect v-model="categoryId" :options="categoryOptions" :search-placeholder="t('Категорияны іздеу')" /></label>
+      <label v-if="!oneTime && isSubscription" class="form-field"><span>{{ t("Қай бөлімге тиесілі?") }}</span><UiSmartSelect v-model="departmentId" :options="departmentOptions" :placeholder="t('Бөлімді таңдаңыз')" :search-placeholder="t('Бөлімді іздеу')" /></label>
+      <label class="form-field"><span>{{ t("Сома") }}</span><div class="money-input"><input v-model.number="amount" type="number" min="1" step="1" placeholder="0" required /><b>₸</b></div></label>
+      <label v-if="!oneTime" class="check-card"><input v-model="recurring" type="checkbox" /><span><strong>{{ t("Әр ай сайын қайталанады") }}</strong><small>{{ t("Жаңа ай құрылғанда автоматты көшіріледі") }}</small></span></label>
+      <div class="modal-actions"><button type="button" class="button ghost" @click="emit('close')">{{ t("Болдырмау") }}</button><button class="button primary" :disabled="payroll.saving.value || (isSubscription && !departmentId)">{{ payroll.saving.value ? t("Сақталуда…") : t("Сақтау") }}</button></div>
     </form>
   </UiModal>
 </template>

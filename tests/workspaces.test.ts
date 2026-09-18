@@ -29,7 +29,9 @@ test("workspace switcher is located immediately above logout", async () => {
   const navigation = await readFile(new URL("app/components/AppNavigation.vue", root), "utf8");
   const header = await readFile(new URL("app/components/PeriodHeader.vue", root), "utf8");
   const switcher = await readFile(new URL("app/components/WorkspaceSwitcher.vue", root), "utf8");
-  assert.match(navigation, /<WorkspaceSwitcher \/>\s+<button class="sidebar-logout"/);
+  // The switcher still sits directly above the footer row, which now holds logout next to the
+  // language and theme switches.
+  assert.match(navigation, /<WorkspaceSwitcher \/>\s+<div class="sidebar-foot">\s+<button class="sidebar-logout"/);
   assert.doesNotMatch(header, /WorkspaceSwitcher/);
   assert.match(switcher, /payroll\.switchWorkspace/);
   assert.match(switcher, /workspace-switcher sidebar-workspace-switcher/);

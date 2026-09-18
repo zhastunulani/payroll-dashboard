@@ -14,6 +14,19 @@ export default defineNuxtConfig({
         },
         { name: "theme-color", content: "#f5f7fb" },
       ],
+      script: [
+        {
+          /**
+           * Applies the saved theme before the first paint. Without it a dark-mode reader gets a
+           * white flash on every load, because the app only learns the cookie once Vue has mounted.
+           */
+          innerHTML: "(()=>{try{var m=document.cookie.match(/(?:^|; )payroll_theme=([^;]*)/);"
+            + "var t=m?decodeURIComponent(m[1]):'light';if(t==='dark'){document.documentElement.dataset.theme='dark';"
+            + "document.documentElement.style.colorScheme='dark';}}catch(e){}})()",
+          type: "text/javascript",
+          tagPosition: "head",
+        },
+      ],
       link: [
         { rel: "icon", href: "/favicon.svg" },
         { rel: "preconnect", href: "https://fonts.googleapis.com" },

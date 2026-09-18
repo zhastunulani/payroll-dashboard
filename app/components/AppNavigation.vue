@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { Building2, Calculator, Check, ChevronDown, Landmark, LayoutDashboard, LogOut, Network, ReceiptText, Settings2, UsersRound, X } from "lucide-vue-next";
+import { Building2, Calculator, Check, ChevronDown, Landmark, LayoutDashboard, LogOut, Moon, Network, ReceiptText, Settings2, Sun, UsersRound, X } from "lucide-vue-next";
 
 const payroll = usePayroll();
 const ctx = useAppContext();
 const route = useRoute();
 const { locale, setLocale, t, locales } = useLocale();
+const { theme, setTheme, toggle: toggleTheme } = useTheme();
+// The button shows the language it is on and switches to the other one.
+const nextLocale = computed(() => locales.find(l => l.id !== locale.value) ?? locales[0]!);
 // Reports cover all projects; Payroll operations work inside the profile chosen below.
 const links = [
   { to: "/", label: "Қаржылық шолу", short: "Шолу", icon: LayoutDashboard, group: "analytics" },
@@ -72,7 +75,11 @@ async function selectWorkspace(id: string) {
   if (id !== payroll.data.value?.selectedWorkspace.id) await payroll.switchWorkspace(id);
 }
 
-onMounted(() => { document.documentElement.lang = locale.value; });
+onMounted(() => {
+  document.documentElement.lang = locale.value;
+  // The cookie is read during setup; this writes it onto <html> so the stylesheets pick it up.
+  setTheme(theme.value);
+});
 onBeforeUnmount(stopSettingsHold);
 </script>
 
@@ -98,18 +105,19 @@ onBeforeUnmount(stopSettingsHold);
         </div>
       </template>
     </nav>
-    <div class="sidebar-status">
-      <i /><span><strong>{{ t("Жүйе жұмыс істеп тұр") }}</strong><small>{{ t("Деректер синхрондалды") }}</small></span>
-    </div>
-    <div class="sidebar-locale" role="group" :aria-label="t('Тіл')">
-      <button
-        v-for="option in locales" :key="option.id" type="button"
-        :class="{ active: locale === option.id }" :aria-pressed="locale === option.id"
-        :title="option.label" @click="setLocale(option.id)"
-      >{{ option.short }}</button>
-    </div>
     <WorkspaceSwitcher />
-    <button class="sidebar-logout" type="button" @click="payroll.logout"><LogOut :size="18" /> {{ t("Шығу") }}</button>
+    <div class="sidebar-foot">
+      <button class="sidebar-logout" type="button" @click="payroll.logout"><LogOut :size="18" /> {{ t("Шығу") }}</button>
+      <div class="sidebar-toggles">
+        <!-- Two one-tap switches rather than two labelled controls: they are set once and then forgotten. -->
+        <button type="button" :title="nextLocale.label" :aria-label="nextLocale.label" @click="setLocale(nextLocale.id)">
+          <span class="locale-mark">{{ locales.find(l => l.id === locale)?.short }}</span>
+        </button>
+        <button type="button" :title="t(theme === 'dark' ? 'Жарық режим' : 'Қараңғы режим')" :aria-label="t(theme === 'dark' ? 'Жарық режим' : 'Қараңғы режим')" @click="toggleTheme">
+          <component :is="theme === 'dark' ? Sun : Moon" :size="16" />
+        </button>
+      </div>
+    </div>
   </aside>
 
   <nav class="mobile-navigation" :aria-label="t('Негізгі навигация')">
